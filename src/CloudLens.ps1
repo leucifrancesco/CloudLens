@@ -1,25 +1,27 @@
-#Requires -Modules Az.Accounts, Az.ResourceGraph, Az.Advisor
+#Requires -Modules Az.Accounts, Az.ResourceGraph, Az.Advisor, ImportExcel
 
 <#
     ============================================================
-    CloudLens
-    Azure Environment Analyzer
+    CloudLens - Azure Environment Analyzer
     ============================================================
 
     Owner         : Francesco Leuci
-    Version       : 0.2
+    Version       : 0.3
     Last Modified : 2026-08-20
 
     Description:
     Read-only Azure environment assessment tool.
 
-    Changes in v0.2:
-    - Added Azure Resource Graph pagination using SkipToken.
-    - Resource discovery is no longer limited to 1,000 resources.
-    - Custom Resource Graph queries also use pagination.
-
-    Mode:
-    READ-ONLY
+    Changes in v0.3:
+    - Added Excel report generation.
+    - Replaced JSON output with XLSX output.
+    - Added Summary worksheet.
+    - Added Findings worksheet.
+    - Simplified Excel presentation.
+    - Combined Description and Evidence into one column.
+    - Added Recommendation column.
+    - Improved Estimated Savings handling.
+    - Resource Graph pagination retained.
 
     ============================================================
 #>
@@ -32,7 +34,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host " CloudLens - V0.2" -ForegroundColor Cyan
+Write-Host " CloudLens - V0.3" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -256,10 +258,11 @@ foreach ($recommendation in $advisorRecommendations) {
     }
 
     # --------------------------------------------------------
-    # Resource name
+    # Resource information
     # --------------------------------------------------------
 
     $resourceName = $null
+    $resourceType = $null
 
     if ($resourceId) {
 
@@ -272,18 +275,37 @@ foreach ($recommendation in $advisorRecommendations) {
         if ($resource) {
 
             $resourceName = $resource.name
+            $resourceType = $resource.type
         }
     }
 
     # --------------------------------------------------------
-    # Potential benefit / savings
+    # Estimated savings
+    #
+    # PotentialBenefit is not necessarily a monetary value.
+    # Only expose it as Estimated Savings if it can be
+    # interpreted as a numeric monetary amount.
     # --------------------------------------------------------
 
-    $estimatedSavings = $null
+    $estimatedSavings = "N/A"
 
     if ($recommendation.PotentialBenefit) {
 
-        $estimatedSavings = $recommendation.PotentialBenefit
+        $potentialBenefit = [string]$recommendation.PotentialBenefit
+
+        $numericValue = 0
+
+        if (
+            [decimal]::TryParse(
+                $potentialBenefit,
+                [System.Globalization.NumberStyles]::Any,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [ref]$numericValue
+            )
+        ) {
+
+            $estimatedSavings = $numericValue
+        }
     }
 
     # --------------------------------------------------------
@@ -292,31 +314,47 @@ foreach ($recommendation in $advisorRecommendations) {
 
     $findings += [PSCustomObject]@{
 
-        Id                   = "ADVISOR-$($recommendation.Name)"
+        Id =
+            "ADVISOR-$($recommendation.Name)"
 
-        RuleId               = "AZ-ADVISOR"
+        RuleId =
+            "AZ-ADVISOR"
 
-        Source               = "Azure Advisor"
+        Source =
+            "Azure Advisor"
 
-        Category             = $category
+        Category =
+            $category
 
-        Severity             = $recommendation.Impact
+        Severity =
+            $recommendation.Impact
 
-        ResourceId           = $resourceId
+        ResourceId =
+            $resourceId
 
-        ResourceName         = $resourceName
+        ResourceName =
+            $resourceName
 
-        Description          = $recommendation.ShortDescriptionProblem
+        ResourceType =
+            $resourceType
 
-        Evidence             = $null
+        Description =
+            $recommendation.ShortDescriptionProblem
 
-        Recommendation       = $recommendation.ShortDescriptionSolution
+        Evidence =
+            $null
 
-        EstimatedSavings     = $estimatedSavings
+        Recommendation =
+            $recommendation.ShortDescriptionSolution
 
-        RemediationAvailable = $false
+        EstimatedSavings =
+            $estimatedSavings
 
-        RemediationAction    = $null
+        RemediationAvailable =
+            $false
+
+        RemediationAction =
+            $null
     }
 }
 
@@ -361,7 +399,7 @@ $nsgFindings = Search-AzGraphAll `
 foreach ($rule in $nsgFindings) {
 
     # --------------------------------------------------------
-    # Determine protocol / service
+    # Determine service
     # --------------------------------------------------------
 
     if ($rule.destinationPortRange -eq "22") {
@@ -401,18 +439,31 @@ foreach ($rule in $nsgFindings) {
 
     $evidence = [PSCustomObject]@{
 
-        Direction            = $rule.direction
+        Direction =
+            $rule.direction
 
-        Access               = $rule.access
+        Access =
+            $rule.access
 
-        Protocol             = $rule.protocol
+        Protocol =
+            $rule.protocol
 
-        SourceAddressPrefix = $rule.sourceAddressPrefix
+        SourceAddressPrefix =
+            $rule.sourceAddressPrefix
 
-        DestinationPort      = $rule.destinationPortRange
+        DestinationPort =
+            $rule.destinationPortRange
 
-        Priority             = $rule.priority
+        Priority =
+            $rule.priority
     }
+
+    # --------------------------------------------------------
+    # Resource type
+    # --------------------------------------------------------
+
+    $resourceType =
+        "Microsoft.Network/networkSecurityGroups"
 
     # --------------------------------------------------------
     # Finding
@@ -441,6 +492,9 @@ foreach ($rule in $nsgFindings) {
         ResourceName =
             $rule.nsgName
 
+        ResourceType =
+            $resourceType
+
         Description =
             $description
 
@@ -451,7 +505,7 @@ foreach ($rule in $nsgFindings) {
             $recommendation
 
         EstimatedSavings =
-            $null
+            "N/A"
 
         RemediationAvailable =
             $false
@@ -534,7 +588,7 @@ else {
 }
 
 # ============================================================
-# JSON OUTPUT
+# EXCEL OUTPUT
 # ============================================================
 
 $outputDirectory = Join-Path `
@@ -551,41 +605,251 @@ if (-not (Test-Path $outputDirectory)) {
 
 $outputFile = Join-Path `
     $outputDirectory `
-    "assessment-$($subscriptionId).json"
+    "assessment-$($subscriptionId).xlsx"
 
 # ============================================================
-# REPORT OBJECT
+# PREPARE EXCEL FINDINGS
 # ============================================================
 
-$report = [PSCustomObject]@{
+$excelFindings = foreach ($finding in $findings) {
 
-    AnalyzerVersion =
-        "0.2"
+    # --------------------------------------------------------
+    # Description + Evidence
+    # --------------------------------------------------------
 
-    GeneratedAt =
-        (Get-Date).ToUniversalTime().ToString("o")
+    $descriptionAndEvidence =
+        $finding.Description
 
-    SubscriptionId =
-        $subscriptionId
+    if (-not [string]::IsNullOrWhiteSpace($finding.Evidence)) {
 
-    SubscriptionName =
-        $subscriptionName
+        $descriptionAndEvidence +=
+            "`r`n`r`nEvidence:`r`n"
 
-    ResourceCount =
-        $resources.Count
+        try {
 
-    FindingCount =
-        $findings.Count
+            $evidenceObject =
+                $finding.Evidence | ConvertFrom-Json
 
-    Findings =
-        $findings
+            foreach ($property in $evidenceObject.PSObject.Properties) {
+
+                $descriptionAndEvidence +=
+                    "$($property.Name): $($property.Value)`r`n"
+            }
+        }
+        catch {
+
+            $descriptionAndEvidence +=
+                "$($finding.Evidence)`r`n"
+        }
+    }
+
+    # --------------------------------------------------------
+    # Excel presentation object
+    # --------------------------------------------------------
+
+    [PSCustomObject]@{
+
+        "Resource Type" =
+            $finding.ResourceType
+
+        "Resource Name" =
+            $finding.ResourceName
+
+        "Category" =
+            $finding.Category
+
+        "Severity" =
+            $finding.Severity
+
+        "Description + Evidence" =
+            $descriptionAndEvidence
+
+        "Recommendation" =
+            $finding.Recommendation
+
+        "Estimated Savings" =
+            $finding.EstimatedSavings
+    }
 }
 
-$report |
-    ConvertTo-Json -Depth 10 |
-    Set-Content `
+# ============================================================
+# EXCEL SUMMARY
+# ============================================================
+
+$criticalCount = @(
+    $findings |
+        Where-Object {
+            $_.Severity -eq "Critical"
+        }
+).Count
+
+$highCount = @(
+    $findings |
+        Where-Object {
+            $_.Severity -eq "High"
+        }
+).Count
+
+$mediumCount = @(
+    $findings |
+        Where-Object {
+            $_.Severity -eq "Medium"
+        }
+).Count
+
+$lowCount = @(
+    $findings |
+        Where-Object {
+            $_.Severity -eq "Low"
+        }
+).Count
+
+$summary = @(
+    [PSCustomObject]@{
+        Metric = "Analyzer Version"
+        Value  = "0.3"
+    }
+
+    [PSCustomObject]@{
+        Metric = "Generated At"
+        Value  = (Get-Date).ToUniversalTime().ToString("o")
+    }
+
+    [PSCustomObject]@{
+        Metric = "Subscription"
+        Value  = $subscriptionName
+    }
+
+    [PSCustomObject]@{
+        Metric = "Subscription ID"
+        Value  = $subscriptionId
+    }
+
+    [PSCustomObject]@{
+        Metric = "Resources Analyzed"
+        Value  = $resources.Count
+    }
+
+    [PSCustomObject]@{
+        Metric = "Findings"
+        Value  = $findings.Count
+    }
+
+    [PSCustomObject]@{
+        Metric = "Critical"
+        Value  = $criticalCount
+    }
+
+    [PSCustomObject]@{
+        Metric = "High"
+        Value  = $highCount
+    }
+
+    [PSCustomObject]@{
+        Metric = "Medium"
+        Value  = $mediumCount
+    }
+
+    [PSCustomObject]@{
+        Metric = "Low"
+        Value  = $lowCount
+    }
+)
+
+# ============================================================
+# EXCEL EXPORT
+# ============================================================
+
+Write-Host "Generating Excel report..." -ForegroundColor Yellow
+
+if (Test-Path $outputFile) {
+
+    Remove-Item `
         -Path $outputFile `
-        -Encoding UTF8
+        -Force
+}
+
+# ------------------------------------------------------------
+# Summary worksheet
+# ------------------------------------------------------------
+
+$summary |
+    Export-Excel `
+        -Path $outputFile `
+        -WorksheetName "Summary" `
+        -AutoSize `
+        -BoldTopRow
+
+# ------------------------------------------------------------
+# Findings worksheet
+# ------------------------------------------------------------
+
+$excelFindings |
+    Export-Excel `
+        -Path $outputFile `
+        -WorksheetName "Findings" `
+        -AutoSize `
+        -FreezeTopRow `
+        -BoldTopRow `
+        -TableName "CloudLensFindings"
+
+# ============================================================
+# EXCEL FORMATTING
+# ============================================================
+
+$excelPackage =
+    Open-ExcelPackage -Path $outputFile
+
+# ------------------------------------------------------------
+# Summary worksheet
+# ------------------------------------------------------------
+
+$summarySheet =
+    $excelPackage.Workbook.Worksheets["Summary"]
+
+$summarySheet.Column(1).Width = 28
+$summarySheet.Column(2).Width = 55
+
+# ------------------------------------------------------------
+# Findings worksheet
+# ------------------------------------------------------------
+
+$findingsSheet =
+    $excelPackage.Workbook.Worksheets["Findings"]
+
+# Resource Type
+$findingsSheet.Column(1).Width = 38
+
+# Resource Name
+$findingsSheet.Column(2).Width = 35
+
+# Category
+$findingsSheet.Column(3).Width = 22
+
+# Severity
+$findingsSheet.Column(4).Width = 14
+
+# Description + Evidence
+$findingsSheet.Column(5).Width = 75
+
+# Recommendation
+$findingsSheet.Column(6).Width = 75
+
+# Estimated Savings
+$findingsSheet.Column(7).Width = 22
+
+# Enable text wrapping
+$findingsSheet.Cells.Style.WrapText = $true
+
+# Vertical alignment
+$findingsSheet.Cells.Style.VerticalAlignment =
+    [OfficeOpenXml.Style.ExcelVerticalAlignment]::Top
+
+# ------------------------------------------------------------
+# Save Excel package
+# ------------------------------------------------------------
+
+Close-ExcelPackage $excelPackage
 
 # ============================================================
 # COMPLETION
