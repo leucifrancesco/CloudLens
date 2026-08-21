@@ -1,0 +1,17 @@
+# CloudLens generated output
+output/
+
+# PowerShell
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+
+# OS files
+Thumbs.db
+.DS_Store
