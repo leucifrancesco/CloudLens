@@ -2,15 +2,21 @@
 
 <#
     ============================================================
+    CloudLens
     Azure Environment Analyzer
     ============================================================
 
     Owner         : Francesco Leuci
-    Version       : 0.1
+    Version       : 0.2
     Last Modified : 2026-08-20
 
     Description:
     Read-only Azure environment assessment tool.
+
+    Changes in v0.2:
+    - Added Azure Resource Graph pagination using SkipToken.
+    - Resource discovery is no longer limited to 1,000 resources.
+    - Custom Resource Graph queries also use pagination.
 
     Mode:
     READ-ONLY
@@ -21,14 +27,12 @@
 $ErrorActionPreference = "Stop"
 
 # ============================================================
-# Azure Environment Analyzer
-# Version: 0.1
-# Mode: READ-ONLY
+# CLOUDLENS
 # ============================================================
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host " Azure Environment Analyzer - V0.1" -ForegroundColor Cyan
+Write-Host " CloudLens - V0.2" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -98,6 +102,66 @@ Write-Host "ID   : $subscriptionId"
 Write-Host ""
 
 # ============================================================
+# RESOURCE GRAPH PAGINATION
+# ============================================================
+
+function Search-AzGraphAll {
+
+    param (
+        [Parameter(Mandatory)]
+        [string]$Query,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId
+    )
+
+    $results = [System.Collections.Generic.List[object]]::new()
+
+    $skipToken = $null
+    $page = 0
+
+    do {
+
+        $page++
+
+        $params = @{
+            Query        = $Query
+            Subscription = $SubscriptionId
+            First        = 1000
+        }
+
+        if ($skipToken) {
+
+            $params.SkipToken = $skipToken
+        }
+
+        Write-Host `
+            "  Resource Graph page $page..." `
+            -ForegroundColor DarkGray
+
+        $response = Search-AzGraph @params
+
+        if ($response.Data) {
+
+            foreach ($item in $response.Data) {
+
+                $results.Add($item)
+            }
+
+            Write-Host `
+                "  Page $page returned $($response.Data.Count) resources." `
+                -ForegroundColor DarkGray
+        }
+
+        $skipToken = $response.SkipToken
+
+    }
+    while ($skipToken)
+
+    return $results.ToArray()
+}
+
+# ============================================================
 # FINDING COLLECTION
 # ============================================================
 
@@ -108,6 +172,7 @@ $findings = @()
 # ============================================================
 
 Write-Host "Discovering Azure resources..." -ForegroundColor Yellow
+Write-Host ""
 
 $query = @"
 Resources
@@ -122,44 +187,11 @@ Resources
 | order by type asc, name asc
 "@
 
-function Search-AzGraphAll {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Query,
+$resources = Search-AzGraphAll `
+    -Query $query `
+    -SubscriptionId $subscriptionId
 
-        [Parameter(Mandatory)]
-        [string]$SubscriptionId
-    )
-
-    $results = @()
-    $skipToken = $null
-
-    do {
-
-        $params = @{
-            Query        = $Query
-            Subscription = $SubscriptionId
-            First        = 1000
-        }
-
-        if ($skipToken) {
-            $params.SkipToken = $skipToken
-        }
-
-        $response = Search-AzGraph @params
-
-        if ($response.Data) {
-            $results += $response.Data
-        }
-
-        $skipToken = $response.SkipToken
-
-    }
-    while ($skipToken)
-
-    return $results
-}
-
+Write-Host ""
 Write-Host "Resources found: $($resources.Count)" -ForegroundColor Green
 Write-Host ""
 
@@ -322,9 +354,9 @@ Resources
 | where destinationPortRange in ('22', '3389')
 "@
 
-$nsgFindings = Search-AzGraph `
+$nsgFindings = Search-AzGraphAll `
     -Query $nsgQuery `
-    -Subscription $subscriptionId
+    -SubscriptionId $subscriptionId
 
 foreach ($rule in $nsgFindings) {
 
@@ -528,7 +560,7 @@ $outputFile = Join-Path `
 $report = [PSCustomObject]@{
 
     AnalyzerVersion =
-        "0.1"
+        "0.2"
 
     GeneratedAt =
         (Get-Date).ToUniversalTime().ToString("o")
