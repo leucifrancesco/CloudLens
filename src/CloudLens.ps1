@@ -1,452 +1,298 @@
-#Requires -Modules Az.Accounts, Az.ResourceGraph, Az.Advisor, Az.Monitor
+<#
+===========================================================================
+ CloudLens - Azure Environment Analyzer
+===========================================================================
 
-$ErrorActionPreference = "Stop"
+ Owner        : Francesco Leuci
+ Version      : 0.7
+ Modified     : 2026-08-21
+ Mode         : READ-ONLY
 
-# ============================================================
-# CloudLens - Azure Environment Analyzer
-#
-# Owner          : Francesco Leuci
-# Last Modified  : 2026-08-21
-# Version        : 0.6
-# Mode           : READ-ONLY
-#
-# V0.6
-# - Azure Resource Graph pagination
-# - Azure Advisor recommendations
-# - Custom security rules
-# - Azure Monitor metric collection
-# - 90-day historical analysis
-# - 30-day metric collection chunks
-# - Metric aggregation
-# - P50 / P95 / P99 / Min / Max
-# - 30 / 60 / 90 day trend analysis
-# - Threshold analysis where applicable
-# - Workload profiles per resource
-# - Raw metric records excluded from final report
-# - Excel output
-# ============================================================
+ Purpose:
+   Azure environment assessment and workload analysis.
 
-$AnalyzerVersion = "0.6"
+ Main capabilities:
+   - Azure Resource Graph discovery
+   - Resource Graph pagination using SkipToken
+   - Azure Monitor metric collection
+   - 90-day workload analysis
+   - 30-day metric windows
+   - 1-hour aggregation
+   - Workload classification
+   - Trend analysis
+   - Azure Advisor recommendations
+   - Custom security rules
+   - Excel reporting
 
-$MetricLookbackDays = 90
-$MetricChunkDays     = 30
-$MetricTimeGrain     = New-TimeSpan -Hours 1
+ Important:
+   - This version does NOT modify Azure resources.
+   - Raw metric datapoints are NOT included in the final report.
+   - Only aggregated workload information is retained.
 
-# ============================================================
-# OUTPUT
-# ============================================================
+ Required modules:
+   - Az.Accounts
+   - Az.ResourceGraph
+   - Az.Monitor
+   - Az.Advisor
+   - ImportExcel
 
-$outputDirectory = Join-Path $PSScriptRoot "output"
+ Tested module versions:
+   Az.ResourceGraph : 1.2.1
+   Az.Monitor       : 7.0.0
 
-if (-not (Test-Path $outputDirectory)) {
+===========================================================================
+#>
 
-    New-Item `
-        -Path $outputDirectory `
-        -ItemType Directory |
-        Out-Null
+# -------------------------------------------------------------------------
+# CONFIGURATION
+# -------------------------------------------------------------------------
+
+$CloudLensVersion = "0.7"
+$CloudLensOwner   = "Francesco Leuci"
+$ModifiedDate     = "2026-08-21"
+
+$LookbackDays     = 90
+$ChunkDays        = 30
+$TimeGrain        = New-TimeSpan -Hours 1
+
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$OutputPath = Join-Path $ScriptRoot "output"
+
+if (-not (Test-Path $OutputPath)) {
+    New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
 }
 
-# ============================================================
-# HELPER - WRITE SECTION
-# ============================================================
+# -------------------------------------------------------------------------
+# MODULE CHECK
+# -------------------------------------------------------------------------
 
-function Write-Section {
-    param(
-        [string]$Title
-    )
+$RequiredModules = @(
+    "Az.Accounts",
+    "Az.ResourceGraph",
+    "Az.Monitor",
+    "Az.Advisor",
+    "ImportExcel"
+)
 
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host " $Title" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host ""
-}
+foreach ($Module in $RequiredModules) {
 
-# ============================================================
-# HELPER - PERCENTILE
-# ============================================================
+    if (-not (Get-Module -ListAvailable -Name $Module)) {
 
-function Get-Percentile {
+        Write-Host ""
+        Write-Host "ERROR: Required module not found: $Module" -ForegroundColor Red
+        Write-Host ""
 
-    param(
-        [double[]]$Values,
-        [double]$Percentile
-    )
+        if ($Module -eq "ImportExcel") {
+            Write-Host "Install with:"
+            Write-Host "Install-Module ImportExcel -Scope CurrentUser"
+        }
+        else {
+            Write-Host "Install the required Az module before continuing."
+        }
 
-    if (-not $Values -or $Values.Count -eq 0) {
-        return $null
-    }
-
-    $sorted = @(
-        $Values |
-        Sort-Object
-    )
-
-    if ($sorted.Count -eq 1) {
-        return [double]$sorted[0]
-    }
-
-    $position = ($sorted.Count - 1) * $Percentile
-
-    $lower = [math]::Floor($position)
-    $upper = [math]::Ceiling($position)
-
-    if ($lower -eq $upper) {
-        return [double]$sorted[$lower]
-    }
-
-    $weight = $position - $lower
-
-    return (
-        [double]$sorted[$lower] +
-        (
-            ([double]$sorted[$upper] - [double]$sorted[$lower]) *
-            $weight
-        )
-    )
-}
-
-# ============================================================
-# HELPER - SAFE NUMBER
-# ============================================================
-
-function Get-SafeDouble {
-
-    param(
-        $Value
-    )
-
-    if ($null -eq $Value) {
-        return $null
-    }
-
-    try {
-        return [double]$Value
-    }
-    catch {
-        return $null
+        exit 1
     }
 }
 
-# ============================================================
-# HELPER - TREND
-# ============================================================
+Import-Module Az.Accounts -ErrorAction Stop
+Import-Module Az.ResourceGraph -ErrorAction Stop
+Import-Module Az.Monitor -ErrorAction Stop
+Import-Module Az.Advisor -ErrorAction Stop
+Import-Module ImportExcel -ErrorAction Stop
 
-function Get-Trend {
+# -------------------------------------------------------------------------
+# HEADER
+# -------------------------------------------------------------------------
 
-    param(
-        [double]$OlderValue,
-        [double]$NewerValue,
-        [double]$ThresholdPercent = 15
-    )
+Clear-Host
 
-    if (
-        $null -eq $OlderValue -or
-        $null -eq $NewerValue
-    ) {
-        return "Insufficient Data"
-    }
-
-    if ($OlderValue -eq 0) {
-
-        if ($NewerValue -eq 0) {
-            return "Stable"
-        }
-
-        return "Increasing"
-    }
-
-    $change =
-        (($NewerValue - $OlderValue) /
-        [math]::Abs($OlderValue)) * 100
-
-    if ($change -gt $ThresholdPercent) {
-        return "Increasing"
-    }
-
-    if ($change -lt (-1 * $ThresholdPercent)) {
-        return "Decreasing"
-    }
-
-    return "Stable"
-}
-
-# ============================================================
-# HELPER - THRESHOLD ANALYSIS
-# ============================================================
-
-function Get-ThresholdAnalysis {
-
-    param(
-        [double[]]$Values,
-        [double]$Threshold
-    )
-
-    if (-not $Values -or $Values.Count -eq 0) {
-
-        return [PSCustomObject]@{
-            Threshold      = $Threshold
-            SamplesAbove   = 0
-            SamplesTotal   = 0
-            PercentAbove   = $null
-        }
-    }
-
-    $above = @(
-        $Values |
-        Where-Object {
-            $_ -gt $Threshold
-        }
-    ).Count
-
-    $total = $Values.Count
-
-    $percent = ($above / $total) * 100
-
-    return [PSCustomObject]@{
-        Threshold      = $Threshold
-        SamplesAbove   = $above
-        SamplesTotal   = $total
-        PercentAbove   = [math]::Round($percent, 2)
-    }
-}
-
-# ============================================================
-# METRIC DEFINITIONS
-# ============================================================
-
-function Get-MetricProfile {
-
-    param(
-        [string]$ResourceType
-    )
-
-    switch -Regex ($ResourceType.ToLower()) {
-
-        "microsoft.compute/virtualmachines$" {
-
-            return @(
-                [PSCustomObject]@{
-                    Name      = "Percentage CPU"
-                    Threshold = 80
-                    Unit      = "%"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Network In Total"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Network Out Total"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Disk Read Bytes"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Disk Write Bytes"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Disk Read Operations/Sec"
-                    Threshold = $null
-                    Unit      = "Count"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Disk Write Operations/Sec"
-                    Threshold = $null
-                    Unit      = "Count"
-                }
-            )
-
-            break
-        }
-
-        "microsoft.network/publicipaddresses$" {
-
-            return @(
-                [PSCustomObject]@{
-                    Name      = "ByteCount"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "PacketCount"
-                    Threshold = $null
-                    Unit      = "Count"
-                }
-            )
-
-            break
-        }
-
-        "microsoft.storage/storageaccounts$" {
-
-            return @(
-                [PSCustomObject]@{
-                    Name      = "Transactions"
-                    Threshold = $null
-                    Unit      = "Count"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Ingress"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Egress"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "UsedCapacity"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Availability"
-                    Threshold = 99
-                    Unit      = "%"
-                }
-            )
-
-            break
-        }
-
-        "microsoft.compute/disks$" {
-
-            return @(
-                [PSCustomObject]@{
-                    Name      = "Disk Read Bytes"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Disk Write Bytes"
-                    Threshold = $null
-                    Unit      = "Bytes"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Disk Read Operations/Sec"
-                    Threshold = $null
-                    Unit      = "Count"
-                }
-
-                [PSCustomObject]@{
-                    Name      = "Disk Write Operations/Sec"
-                    Threshold = $null
-                    Unit      = "Count"
-                }
-            )
-
-            break
-        }
-
-        default {
-            return @()
-        }
-    }
-}
-
-# ============================================================
-# AZURE AUTHENTICATION
-# ============================================================
-
-Write-Section "CloudLens - Azure Environment Analyzer"
-
-Write-Host "Version : $AnalyzerVersion"
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " CloudLens - Azure Environment Analyzer" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Version : $CloudLensVersion"
+Write-Host "Owner   : $CloudLensOwner"
+Write-Host "Date    : $ModifiedDate"
 Write-Host "Mode    : READ-ONLY"
 Write-Host ""
 
-$context = Get-AzContext
+# -------------------------------------------------------------------------
+# AZURE LOGIN
+# -------------------------------------------------------------------------
 
-if (-not $context) {
+try {
+    $AzureContext = Get-AzContext -ErrorAction SilentlyContinue
 
-    Write-Host "Azure session not found. Connecting..." -ForegroundColor Yellow
-
-    Connect-AzAccount
-
-    $context = Get-AzContext
+    if (-not $AzureContext) {
+        Connect-AzAccount -ErrorAction Stop | Out-Null
+    }
+}
+catch {
+    Write-Host ""
+    Write-Host "Unable to authenticate to Azure." -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit 1
 }
 
-# ============================================================
+# -------------------------------------------------------------------------
 # SUBSCRIPTION SELECTION
-# ============================================================
+# -------------------------------------------------------------------------
 
-$subscriptions = @(
-    Get-AzSubscription |
-    Where-Object {
-        $_.State -eq "Enabled"
-    } |
-    Sort-Object Name
-)
+$Subscriptions = @(Get-AzSubscription | Where-Object {
+    $_.State -eq "Enabled"
+})
 
-Write-Host "Available subscriptions:" -ForegroundColor Yellow
+if ($Subscriptions.Count -eq 0) {
+
+    Write-Host ""
+    Write-Host "No enabled Azure subscriptions found." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Available subscriptions:"
 Write-Host ""
 
-for ($i = 0; $i -lt $subscriptions.Count; $i++) {
-
-    Write-Host "[$($i + 1)] $($subscriptions[$i].Name)"
+for ($i = 0; $i -lt $Subscriptions.Count; $i++) {
+    Write-Host "[$($i + 1)] $($Subscriptions[$i].Name)"
 }
 
 Write-Host ""
 
-$selection = Read-Host "Select subscription"
+do {
+    $Selection = Read-Host "Select subscription"
 
-if (-not ($selection -as [int])) {
-    throw "Invalid subscription selection."
+    $SelectionValid =
+        ($Selection -as [int]) -and
+        ([int]$Selection -ge 1) -and
+        ([int]$Selection -le $Subscriptions.Count)
+
 }
+until ($SelectionValid)
 
-$index = [int]$selection - 1
-
-if (
-    $index -lt 0 -or
-    $index -ge $subscriptions.Count
-) {
-    throw "Invalid subscription selection."
-}
-
-$subscription = $subscriptions[$index]
+$SelectedSubscription = $Subscriptions[[int]$Selection - 1]
 
 Set-AzContext `
-    -SubscriptionId $subscription.Id `
-    -ErrorAction Stop |
-    Out-Null
+    -SubscriptionId $SelectedSubscription.Id `
+    -ErrorAction Stop | Out-Null
 
-$subscriptionId   = $subscription.Id
-$subscriptionName = $subscription.Name
+$SubscriptionId   = $SelectedSubscription.Id
+$SubscriptionName = $SelectedSubscription.Name
 
 Write-Host ""
-Write-Host "Selected subscription:" -ForegroundColor Green
-Write-Host "Name : $subscriptionName"
-Write-Host "ID   : $subscriptionId"
+Write-Host "Selected subscription:"
+Write-Host "Name : $SubscriptionName"
+Write-Host "ID   : $SubscriptionId"
 Write-Host ""
 
-# ============================================================
-# RESOURCE GRAPH PAGINATION
-# ============================================================
+# =========================================================================
+# FUNCTION: SEARCH RESOURCE GRAPH
+# =========================================================================
 
-Write-Section "Discovering Azure resources..."
+function Search-CloudLensResourceGraph {
 
-$resourceQuery = @"
-Resources
+    param(
+        [Parameter(Mandatory)]
+        [string]$Query,
+
+        [Parameter(Mandatory)]
+        [string[]]$SubscriptionIds
+    )
+
+    $AllResults = @()
+    $SkipToken  = $null
+    $Page       = 1
+    $PageSize   = 1000
+
+    do {
+
+        Write-Host "  Resource Graph page $Page..." -ForegroundColor Gray
+
+        try {
+
+            if ($null -eq $SkipToken) {
+
+                $Response = Search-AzGraph `
+                    -Query $Query `
+                    -Subscription $SubscriptionIds `
+                    -First $PageSize `
+                    -ErrorAction Stop
+
+            }
+            else {
+
+                $Response = Search-AzGraph `
+                    -Query $Query `
+                    -Subscription $SubscriptionIds `
+                    -First $PageSize `
+                    -SkipToken $SkipToken `
+                    -ErrorAction Stop
+            }
+
+        }
+        catch {
+
+            Write-Host ""
+            Write-Host "Resource Graph query failed." -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
+            throw
+        }
+
+        # Search-AzGraph may return a response object containing Data
+        # or directly return the records depending on module behaviour.
+
+        if ($Response.PSObject.Properties.Name -contains "Data") {
+
+            $PageData = @($Response.Data)
+
+        }
+        else {
+
+            $PageData = @($Response)
+        }
+
+        if ($PageData.Count -gt 0) {
+            $AllResults += $PageData
+        }
+
+        Write-Host "  Page $Page returned $($PageData.Count) resources."
+
+        $NextToken = $null
+
+        if ($Response.PSObject.Properties.Name -contains "SkipToken") {
+            $NextToken = $Response.SkipToken
+        }
+
+        if ($Response.PSObject.Properties.Name -contains "SkipTokenValue") {
+            if (-not $NextToken) {
+                $NextToken = $Response.SkipTokenValue
+            }
+        }
+
+        $SkipToken = $NextToken
+
+        $Page++
+
+    }
+    while (
+        $SkipToken -and
+        $PageData.Count -gt 0
+    )
+
+    return $AllResults
+}
+
+# =========================================================================
+# RESOURCE DISCOVERY
+# =========================================================================
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Discovering Azure resources..." -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+$ResourceQuery = @"
+resources
 | project
     id,
     name,
@@ -454,863 +300,650 @@ Resources
     resourceGroup,
     location,
     subscriptionId,
-    tags,
     sku,
     kind,
-    properties
+    tags
 | order by type asc, name asc
 "@
 
-$resources = @()
-$skipToken = $null
-$page = 0
-
-do {
-
-    $page++
-
-    Write-Host "  Resource Graph page $page..." -ForegroundColor DarkGray
-
-    if ($skipToken) {
-
-        $result = Search-AzGraph `
-            -Query $resourceQuery `
-            -Subscription $subscriptionId `
-            -First 1000 `
-            -SkipToken $skipToken
-    }
-    else {
-
-        $result = Search-AzGraph `
-            -Query $resourceQuery `
-            -Subscription $subscriptionId `
-            -First 1000
-    }
-
-    $pageResources = @($result)
-
-    $resources += $pageResources
-
-    Write-Host "  Page $page returned $($pageResources.Count) resources." -ForegroundColor DarkGray
-
-    $skipToken = $result.SkipToken
-
-}
-while ($skipToken)
+$Resources = @(Search-CloudLensResourceGraph `
+    -Query $ResourceQuery `
+    -SubscriptionIds @($SubscriptionId))
 
 Write-Host ""
-Write-Host "Resources found: $($resources.Count)" -ForegroundColor Green
+Write-Host "Resources found: $($Resources.Count)"
 Write-Host ""
 
-# ============================================================
-# RAW METRICS COLLECTION
-# ============================================================
+# =========================================================================
+# METRIC PROFILE DEFINITIONS
+# =========================================================================
 
-Write-Section "Collecting Azure Monitor workload metrics..."
+$MetricProfiles = @{
 
-$metricEndTime =
-    Get-Date
-
-$metricStartTime =
-    $metricEndTime.AddDays(
-        -$MetricLookbackDays
+    "microsoft.compute/virtualmachines" = @(
+        "Percentage CPU",
+        "Network In Total",
+        "Network Out Total",
+        "Disk Read Bytes",
+        "Disk Write Bytes",
+        "Disk Read Operations/Sec",
+        "Disk Write Operations/Sec"
     )
 
-Write-Host "Lookback period : $MetricLookbackDays days"
-Write-Host "Time grain      : $($MetricTimeGrain.ToString())"
-Write-Host "Chunk size      : $MetricChunkDays days"
-Write-Host ""
+    "microsoft.storage/storageaccounts" = @(
+        "Transactions",
+        "Ingress",
+        "Egress",
+        "UsedCapacity",
+        "Availability"
+    )
 
-# Internal raw data.
-# This object is deliberately NOT exported to Excel.
-$rawMetrics = @()
+    "microsoft.network/publicipaddresses" = @(
+        "ByteCount",
+        "PacketCount"
+    )
+}
 
-$metricResources = @()
+# =========================================================================
+# FUNCTION: GET METRIC
+# =========================================================================
 
-foreach ($resource in $resources) {
+function Get-CloudLensMetric {
 
-    $profile = Get-MetricProfile `
-        -ResourceType $resource.type
-        
-    if ($profile.Count -gt 0) {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceId,
 
-        $metricResources += $resource
+        [Parameter(Mandatory)]
+        [string]$MetricName,
+
+        [Parameter(Mandatory)]
+        [datetime]$StartTime,
+
+        [Parameter(Mandatory)]
+        [datetime]$EndTime,
+
+        [Parameter(Mandatory)]
+        [timespan]$TimeGrain
+    )
+
+    try {
+
+        # IMPORTANT:
+        # No -DetailedOutput.
+        #
+        # Az.Monitor 7.0.0 still exposes the parameter for compatibility,
+        # but it is deprecated and must not be used.
+
+        $Metric = Get-AzMetric `
+            -ResourceId $ResourceId `
+            -MetricName $MetricName `
+            -StartTime $StartTime `
+            -EndTime $EndTime `
+            -TimeGrain $TimeGrain `
+            -AggregationType Average `
+            -ErrorAction Stop `
+            -WarningAction SilentlyContinue
+
+        return $Metric
+    }
+    catch {
+
+        return $null
     }
 }
 
-Write-Host "Resources with metric profiles: $($metricResources.Count)"
-Write-Host ""
+# =========================================================================
+# FUNCTION: EXTRACT METRIC VALUES
+# =========================================================================
 
-# ============================================================
-# COLLECT METRICS
-# ============================================================
+function ConvertTo-CloudLensMetricPoints {
 
-foreach ($resource in $metricResources) {
+    param(
+        [Parameter(Mandatory)]
+        $MetricResult,
 
-    $profile =
-        Get-MetricProfile `
-            -ResourceType $resource.type
+        [Parameter(Mandatory)]
+        [string]$ResourceId,
 
-    Write-Host ""
-    Write-Host "    Collecting $($resource.type.Split('/')[-1]) metrics: $($resource.name)" `
-        -ForegroundColor Yellow
+        [Parameter(Mandatory)]
+        [string]$ResourceName,
 
-    $windowStart = $metricStartTime
+        [Parameter(Mandatory)]
+        [string]$ResourceType,
 
-    while ($windowStart -lt $metricEndTime) {
+        [Parameter(Mandatory)]
+        [string]$MetricName
+    )
 
-        $windowEnd =
-            $windowStart.AddDays($MetricChunkDays)
+    $Points = @()
 
-        if ($windowEnd -gt $metricEndTime) {
-            $windowEnd = $metricEndTime
+    if (-not $MetricResult) {
+        return $Points
+    }
+
+    foreach ($Metric in @($MetricResult)) {
+
+        if (-not $Metric.Timeseries) {
+            continue
         }
 
-        Write-Host `
-            "        Window: $($windowStart.ToString('yyyy-MM-dd')) -> $($windowEnd.ToString('yyyy-MM-dd'))" `
-            -ForegroundColor DarkGray
+        foreach ($TimeSeries in $Metric.Timeseries) {
 
-        foreach ($metricDefinition in $profile) {
+            foreach ($Data in @($TimeSeries.Data)) {
 
-            try {
+                $Value = $null
 
-                $metricResult = Get-AzMetric `
-                    -ResourceId $resource.id `
-                    -MetricName $metricDefinition.Name `
-                    -TimeGrain $MetricTimeGrain `
-                    -StartTime $windowStart `
-                    -EndTime $windowEnd `
-                    -AggregationType Average `
-                    -ErrorAction Stop
+                if ($null -ne $Data.Average) {
+                    $Value = $Data.Average
+                }
+                elseif ($null -ne $Data.Total) {
+                    $Value = $Data.Total
+                }
+                elseif ($null -ne $Data.Maximum) {
+                    $Value = $Data.Maximum
+                }
+                elseif ($null -ne $Data.Minimum) {
+                    $Value = $Data.Minimum
+                }
 
-                foreach ($metric in @($metricResult)) {
+                if ($null -eq $Value) {
+                    continue
+                }
 
-                    foreach ($metricSeries in @($metric.TimeSeries)) {
+                $Timestamp = $Data.TimeStamp
 
-                        foreach ($dataPoint in @($metricSeries.Data)) {
+                if (-not $Timestamp) {
+                    continue
+                }
 
-                            $value = $null
-
-                            if ($null -ne $dataPoint.Average) {
-                                $value = Get-SafeDouble $dataPoint.Average
-                            }
-                            elseif ($null -ne $dataPoint.Total) {
-                                $value = Get-SafeDouble $dataPoint.Total
-                            }
-                            elseif ($null -ne $dataPoint.Maximum) {
-                                $value = Get-SafeDouble $dataPoint.Maximum
-                            }
-
-                            if ($null -eq $value) {
-                                continue
-                            }
-
-                            $rawMetrics += [PSCustomObject]@{
-
-                                ResourceId   = $resource.id
-                                ResourceName = $resource.name
-                                ResourceType = $resource.type
-
-                                MetricName   = $metricDefinition.Name
-                                Unit         = $metricDefinition.Unit
-
-                                Timestamp    = $dataPoint.TimeStamp
-                                Value        = $value
-
-                                Threshold    = $metricDefinition.Threshold
-                            }
-                        }
-                    }
+                $Points += [PSCustomObject]@{
+                    ResourceId   = $ResourceId
+                    ResourceName = $ResourceName
+                    ResourceType = $ResourceType
+                    MetricName   = $MetricName
+                    Timestamp    = $Timestamp
+                    Value        = [double]$Value
                 }
             }
-            catch {
+        }
+    }
 
-                Write-Host `
-                    "        Metric unavailable: $($metricDefinition.Name)" `
-                    -ForegroundColor DarkYellow
+    return $Points
+}
 
-                Write-Host `
-                    "        Resource: $($resource.name)" `
-                    -ForegroundColor DarkGray
+# =========================================================================
+# METRIC COLLECTION
+# =========================================================================
 
-                Write-Host `
-                    "        Reason: $($_.Exception.Message)" `
-                    -ForegroundColor DarkGray
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Collecting Azure Monitor workload metrics..." -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+$EndTime   = Get-Date
+$StartTime = $EndTime.AddDays(-$LookbackDays)
+
+Write-Host "Lookback period : $LookbackDays days"
+Write-Host "Time grain      : $($TimeGrain.ToString())"
+Write-Host "Chunk size      : $ChunkDays days"
+Write-Host ""
+
+$MetricResources = @(
+    $Resources | Where-Object {
+        $MetricProfiles.ContainsKey($_.type.ToLower())
+    }
+)
+
+Write-Host "Resources with metric profiles: $($MetricResources.Count)"
+Write-Host ""
+
+$RawMetricData = @()
+
+foreach ($Resource in $MetricResources) {
+
+    $ResourceType = $Resource.type.ToLower()
+    $ResourceId   = $Resource.id
+    $ResourceName = $Resource.name
+
+    $Metrics = $MetricProfiles[$ResourceType]
+
+    Write-Host ""
+    Write-Host "    Collecting $ResourceType metrics: $ResourceName" `
+        -ForegroundColor Gray
+
+    $WindowStart = $StartTime
+
+    while ($WindowStart -lt $EndTime) {
+
+        $WindowEnd = $WindowStart.AddDays($ChunkDays)
+
+        if ($WindowEnd -gt $EndTime) {
+            $WindowEnd = $EndTime
+        }
+
+        Write-Host "        Window: $($WindowStart.ToString('yyyy-MM-dd')) -> $($WindowEnd.ToString('yyyy-MM-dd'))"
+
+        foreach ($MetricName in $Metrics) {
+
+            $MetricResult = Get-CloudLensMetric `
+                -ResourceId $ResourceId `
+                -MetricName $MetricName `
+                -StartTime $WindowStart `
+                -EndTime $WindowEnd `
+                -TimeGrain $TimeGrain
+
+            if ($MetricResult) {
+
+                $Points = ConvertTo-CloudLensMetricPoints `
+                    -MetricResult $MetricResult `
+                    -ResourceId $ResourceId `
+                    -ResourceName $ResourceName `
+                    -ResourceType $ResourceType `
+                    -MetricName $MetricName
+
+                if ($Points.Count -gt 0) {
+                    $RawMetricData += $Points
+                }
             }
         }
 
-        $windowStart = $windowEnd
+        $WindowStart = $WindowEnd
     }
 }
 
 Write-Host ""
-Write-Host "Raw metric collection completed." -ForegroundColor Green
-Write-Host "Raw metric records: $($rawMetrics.Count)" -ForegroundColor Green
+Write-Host "Raw metric collection completed."
+Write-Host "Raw metric records: $($RawMetricData.Count)"
 Write-Host ""
 
-# ============================================================
+# =========================================================================
 # METRIC AGGREGATION
-# ============================================================
+# =========================================================================
 
-Write-Section "Aggregating workload metrics..."
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Aggregating workload metrics..." -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
 
-$metricAggregates = @()
+$AggregatedProfiles = @()
 
-$metricGroups =
-    $rawMetrics |
-    Group-Object `
-        ResourceId,
-        ResourceName,
-        ResourceType,
-        MetricName,
-        Unit,
-        Threshold
+$GroupedMetrics = $RawMetricData |
+    Group-Object ResourceId, ResourceName, ResourceType, MetricName
 
-foreach ($group in $metricGroups) {
+foreach ($Group in $GroupedMetrics) {
 
-    $items = @(
-        $group.Group |
-        Sort-Object Timestamp
-    )
+    $Rows = @($Group.Group)
 
-    if ($items.Count -eq 0) {
+    if ($Rows.Count -eq 0) {
         continue
     }
 
-    $values = @(
-        $items |
-        ForEach-Object {
-            [double]$_.Value
-        }
+    $Values = @($Rows | ForEach-Object {
+        [double]$_.Value
+    })
+
+    $Average = ($Values | Measure-Object -Average).Average
+    $Minimum = ($Values | Measure-Object -Minimum).Minimum
+    $Maximum = ($Values | Measure-Object -Maximum).Maximum
+
+    $SortedValues = @(
+        $Values | Sort-Object
     )
 
-    $latestTimestamp =
-        ($items |
-            Measure-Object Timestamp -Maximum).Maximum
+    $P95Index = [math]::Floor(($SortedValues.Count - 1) * 0.95)
 
-    $latestValue =
-        [double](
-            $items |
-            Sort-Object Timestamp |
-            Select-Object -Last 1
-        ).Value
-
-    # --------------------------------------------------------
-    # 90 DAYS
-    # --------------------------------------------------------
-
-    $period90 =
-        $metricEndTime.AddDays(-90)
-
-    $values90 = @(
-        $items |
-        Where-Object {
-            $_.Timestamp -ge $period90
-        } |
-        ForEach-Object {
-            [double]$_.Value
-        }
-    )
-
-    # --------------------------------------------------------
-    # 60 DAYS
-    # --------------------------------------------------------
-
-    $period60 =
-        $metricEndTime.AddDays(-60)
-
-    $values60 = @(
-        $items |
-        Where-Object {
-            $_.Timestamp -ge $period60
-        } |
-        ForEach-Object {
-            [double]$_.Value
-        }
-    )
-
-    # --------------------------------------------------------
-    # 30 DAYS
-    # --------------------------------------------------------
-
-    $period30 =
-        $metricEndTime.AddDays(-30)
-
-    $values30 = @(
-        $items |
-        Where-Object {
-            $_.Timestamp -ge $period30
-        } |
-        ForEach-Object {
-            [double]$_.Value
-        }
-    )
-
-    # --------------------------------------------------------
-    # STATISTICS
-    # --------------------------------------------------------
-
-    $min =
-        ($values |
-            Measure-Object -Minimum).Minimum
-
-    $max =
-        ($values |
-            Measure-Object -Maximum).Maximum
-
-    $average =
-        ($values |
-            Measure-Object -Average).Average
-
-    $p50 =
-        Get-Percentile `
-            -Values $values `
-            -Percentile 0.50
-
-    $p95 =
-        Get-Percentile `
-            -Values $values `
-            -Percentile 0.95
-
-    $p99 =
-        Get-Percentile `
-            -Values $values `
-            -Percentile 0.99
-
-    # --------------------------------------------------------
-    # 30 / 60 / 90 P95
-    # --------------------------------------------------------
-
-    $p95_30 =
-        Get-Percentile `
-            -Values $values30 `
-            -Percentile 0.95
-
-    $p95_60 =
-        Get-Percentile `
-            -Values $values60 `
-            -Percentile 0.95
-
-    $p95_90 =
-        Get-Percentile `
-            -Values $values90 `
-            -Percentile 0.95
-
-    # --------------------------------------------------------
-    # TREND
-    # --------------------------------------------------------
-
-    $trend =
-        Get-Trend `
-            -OlderValue $p95_90 `
-            -NewerValue $p95_30
-
-    # --------------------------------------------------------
-    # THRESHOLD
-    # --------------------------------------------------------
-
-    $threshold = $group.Group[0].Threshold
-
-    $thresholdAnalysis = $null
-
-    if ($null -ne $threshold) {
-
-        $thresholdAnalysis =
-            Get-ThresholdAnalysis `
-                -Values $values `
-                -Threshold $threshold
+    if ($P95Index -lt 0) {
+        $P95Index = 0
     }
 
-    $percentAbove = $null
+    $P95 = $SortedValues[$P95Index]
 
-    if ($thresholdAnalysis) {
-        $percentAbove =
-            $thresholdAnalysis.PercentAbove
-    }
+    # ---------------------------------------------------------------------
+    # Trend
+    # ---------------------------------------------------------------------
 
-    # --------------------------------------------------------
-    # AGGREGATED RECORD
-    # --------------------------------------------------------
+    $OrderedRows = @(
+        $Rows | Sort-Object Timestamp
+    )
 
-    $metricAggregates += [PSCustomObject]@{
+    $FirstValues = @(
+        $OrderedRows |
+        Select-Object -First ([math]::Max(1,[math]::Floor($OrderedRows.Count * 0.20))) |
+        ForEach-Object { [double]$_.Value }
+    )
 
-        ResourceId   = $group.Group[0].ResourceId
-        ResourceName = $group.Group[0].ResourceName
-        ResourceType = $group.Group[0].ResourceType
+    $LastValues = @(
+        $OrderedRows |
+        Select-Object -Last ([math]::Max(1,[math]::Floor($OrderedRows.Count * 0.20))) |
+        ForEach-Object { [double]$_.Value }
+    )
 
-        MetricName   = $group.Group[0].MetricName
-        Unit         = $group.Group[0].Unit
+    $FirstAverage = ($FirstValues | Measure-Object -Average).Average
+    $LastAverage  = ($LastValues | Measure-Object -Average).Average
 
-        SampleCount  = $values.Count
+    if ($FirstAverage -eq 0) {
 
-        Min          = [math]::Round($min, 4)
-        Average      = [math]::Round($average, 4)
-
-        P50          = [math]::Round($p50, 4)
-        P95          = [math]::Round($p95, 4)
-        P99          = [math]::Round($p99, 4)
-
-        Max          = [math]::Round($max, 4)
-
-        LatestValue  = [math]::Round($latestValue, 4)
-
-        P95_30Days   = if ($null -ne $p95_30) {
-            [math]::Round($p95_30, 4)
+        if ($LastAverage -eq 0) {
+            $TrendPercent = 0
         }
         else {
-            $null
-        }
-
-        P95_60Days   = if ($null -ne $p95_60) {
-            [math]::Round($p95_60, 4)
-        }
-        else {
-            $null
-        }
-
-        P95_90Days   = if ($null -ne $p95_90) {
-            [math]::Round($p95_90, 4)
-        }
-        else {
-            $null
-        }
-
-        Trend        = $trend
-
-        Threshold    = $threshold
-
-        PercentAboveThreshold =
-            $percentAbove
-
-        LatestTimestamp =
-            $latestTimestamp
-    }
-}
-
-Write-Host "Metric aggregation completed." -ForegroundColor Green
-Write-Host "Aggregated metric profiles: $($metricAggregates.Count)" -ForegroundColor Green
-Write-Host ""
-
-# ============================================================
-# WORKLOAD PROFILES
-# ============================================================
-
-Write-Section "Building workload profiles..."
-
-$workloadProfiles = @()
-
-$resourceGroups =
-    $metricAggregates |
-    Group-Object `
-        ResourceId,
-        ResourceName,
-        ResourceType
-
-foreach ($resourceGroup in $resourceGroups) {
-
-    $metrics =
-        @($resourceGroup.Group)
-
-    $metricNames =
-        @(
-            $metrics |
-            Select-Object -ExpandProperty MetricName -Unique
-        )
-
-    # --------------------------------------------------------
-    # General workload classification
-    #
-    # This is intentionally descriptive only.
-    # V0.6 does NOT make architecture decisions.
-    # --------------------------------------------------------
-
-    $cpuMetric =
-        $metrics |
-        Where-Object {
-            $_.MetricName -eq "Percentage CPU"
-        } |
-        Select-Object -First 1
-
-    $workloadClassification = "Unknown"
-
-    if ($cpuMetric) {
-
-        if (
-            $cpuMetric.P95 -lt 20 -and
-            $cpuMetric.PercentAboveThreshold -lt 1
-        ) {
-            $workloadClassification = "Low"
-        }
-        elseif ($cpuMetric.P95 -lt 60) {
-            $workloadClassification = "Moderate"
-        }
-        else {
-            $workloadClassification = "High"
+            $TrendPercent = 100
         }
     }
     else {
-
-        $workloadClassification = "Metrics Available"
+        $TrendPercent =
+            (($LastAverage - $FirstAverage) / $FirstAverage) * 100
     }
 
-    # --------------------------------------------------------
+    if ($TrendPercent -gt 10) {
+        $Trend = "Increasing"
+    }
+    elseif ($TrendPercent -lt -10) {
+        $Trend = "Decreasing"
+    }
+    else {
+        $Trend = "Stable"
+    }
+
+    $AggregatedProfiles += [PSCustomObject]@{
+        ResourceId       = $Rows[0].ResourceId
+        ResourceName     = $Rows[0].ResourceName
+        ResourceType     = $Rows[0].ResourceType
+        MetricName       = $Rows[0].MetricName
+        SampleCount      = $Rows.Count
+        Average          = [math]::Round($Average,4)
+        Minimum          = [math]::Round($Minimum,4)
+        Maximum          = [math]::Round($Maximum,4)
+        P95              = [math]::Round($P95,4)
+        TrendPercent     = [math]::Round($TrendPercent,2)
+        Trend            = $Trend
+    }
+}
+
+Write-Host "Metric aggregation completed."
+Write-Host "Aggregated metric profiles: $($AggregatedProfiles.Count)"
+Write-Host ""
+
+# =========================================================================
+# WORKLOAD PROFILES
+# =========================================================================
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Building workload profiles..." -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+$WorkloadProfiles = @()
+
+$ResourceMetricGroups =
+    $AggregatedProfiles |
+    Group-Object ResourceId, ResourceName, ResourceType
+
+foreach ($Group in $ResourceMetricGroups) {
+
+    $Metrics = @($Group.Group)
+
+    $ResourceName = $Metrics[0].ResourceName
+    $ResourceType = $Metrics[0].ResourceType
+    $ResourceId   = $Metrics[0].ResourceId
+
+    # ---------------------------------------------------------------------
+    # Workload classification
+    # ---------------------------------------------------------------------
+
+    $Classification = "Metrics Available"
+
+    if ($ResourceType -eq "microsoft.compute/virtualmachines") {
+
+        $CpuMetric = $Metrics |
+            Where-Object { $_.MetricName -eq "Percentage CPU" }
+
+        if ($CpuMetric) {
+
+            if ($CpuMetric.P95 -lt 10) {
+                $Classification = "Low"
+            }
+            elseif ($CpuMetric.P95 -lt 40) {
+                $Classification = "Moderate"
+            }
+            elseif ($CpuMetric.P95 -lt 70) {
+                $Classification = "High"
+            }
+            else {
+                $Classification = "Very High"
+            }
+        }
+    }
+
+    # ---------------------------------------------------------------------
     # Overall trend
-    # --------------------------------------------------------
+    # ---------------------------------------------------------------------
 
-    $trends =
-        @(
-            $metrics |
-            Where-Object {
-                $_.Trend -ne "Insufficient Data"
-            } |
-            Select-Object -ExpandProperty Trend
-        )
+    $TrendValues = @(
+        $Metrics | ForEach-Object {
+            [double]$_.TrendPercent
+        }
+    )
 
-    $overallTrend = "Stable"
+    if ($TrendValues.Count -gt 0) {
 
-    if ($trends -contains "Increasing") {
-        $overallTrend = "Increasing"
+        $TrendAverage =
+            ($TrendValues | Measure-Object -Average).Average
+
+        if ($TrendAverage -gt 10) {
+            $OverallTrend = "Increasing"
+        }
+        elseif ($TrendAverage -lt -10) {
+            $OverallTrend = "Decreasing"
+        }
+        else {
+            $OverallTrend = "Stable"
+        }
     }
-    elseif ($trends -contains "Decreasing") {
-        $overallTrend = "Decreasing"
+    else {
+        $OverallTrend = "Unknown"
     }
 
-    $workloadProfiles += [PSCustomObject]@{
-
-        ResourceId =
-            $resourceGroup.Group[0].ResourceId
-
-        ResourceName =
-            $resourceGroup.Group[0].ResourceName
-
-        ResourceType =
-            $resourceGroup.Group[0].ResourceType
-
-        MetricCount =
-            $metrics.Count
-
-        WorkloadClassification =
-            $workloadClassification
-
-        OverallTrend =
-            $overallTrend
-
-        MetricsCollected =
-            ($metricNames -join ", ")
-
-        AnalysisPeriodDays =
-            90
+    $WorkloadProfiles += [PSCustomObject]@{
+        ResourceId            = $ResourceId
+        ResourceName          = $ResourceName
+        ResourceType          = $ResourceType
+        MetricCount           = $Metrics.Count
+        WorkloadClassification = $Classification
+        OverallTrend          = $OverallTrend
     }
 }
 
-Write-Host "Workload profiles generated: $($workloadProfiles.Count)" `
-    -ForegroundColor Green
-
+Write-Host "Workload profiles generated: $($WorkloadProfiles.Count)"
 Write-Host ""
 
-# ============================================================
+# =========================================================================
 # AZURE ADVISOR
-# ============================================================
+# =========================================================================
 
-Write-Section "Collecting Azure Advisor recommendations..."
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Collecting Azure Advisor recommendations..." -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
 
-$findings = @()
+$Findings = @()
 
-$advisorRecommendations =
-    @(Get-AzAdvisorRecommendation)
+try {
 
-Write-Host `
-    "Advisor recommendations found: $($advisorRecommendations.Count)" `
-    -ForegroundColor Green
+    $AdvisorRecommendations =
+        @(Get-AzAdvisorRecommendation -ErrorAction Stop)
+
+    Write-Host "Advisor recommendations found: $($AdvisorRecommendations.Count)"
+
+    foreach ($Recommendation in $AdvisorRecommendations) {
+
+        $Category = switch ($Recommendation.Category) {
+            "Cost"      { "Cost Optimization" }
+            "Security"  { "Security" }
+            "Reliability" { "Reliability" }
+            "OperationalExcellence" { "Operational Excellence" }
+            "Performance" { "Performance Efficiency" }
+            default { $Recommendation.Category }
+        }
+
+        $Severity = switch ($Recommendation.Impact) {
+            "High"   { "High" }
+            "Medium" { "Medium" }
+            "Low"    { "Low" }
+            default  { "Medium" }
+        }
+
+        $ResourceName = ""
+
+        if ($Recommendation.ImpactedField) {
+            $ResourceName = $Recommendation.ImpactedField
+        }
+
+        $Findings += [PSCustomObject]@{
+            RuleId          = "AZ-ADVISOR"
+            Source          = "Azure Advisor"
+            ResourceType    = ""
+            ResourceName    = $ResourceName
+            Category        = $Category
+            Severity        = $Severity
+            Description     = $Recommendation.ShortDescription.Problem
+            Evidence        = $Recommendation.Description
+            EstimatedSavings = ""
+            Recommendation  = $Recommendation.ShortDescription.Solution
+        }
+    }
+}
+catch {
+
+    Write-Host ""
+    Write-Host "Unable to retrieve Azure Advisor recommendations." `
+        -ForegroundColor Yellow
+}
 
 Write-Host ""
 
-foreach ($recommendation in $advisorRecommendations) {
-
-    $category = switch ($recommendation.Category) {
-
-        "Cost" {
-            "Cost"
-            break
-        }
-
-        "Security" {
-            "Security"
-            break
-        }
-
-        "HighAvailability" {
-            "Reliability"
-            break
-        }
-
-        "Performance" {
-            "Performance"
-            break
-        }
-
-        "OperationalExcellence" {
-            "Operational Excellence"
-            break
-        }
-
-        default {
-            $recommendation.Category
-        }
-    }
-
-    $resourceId =
-        $recommendation.ResourceMetadataResourceId
-
-    if ([string]::IsNullOrWhiteSpace($resourceId)) {
-        $resourceId =
-            $recommendation.ImpactedValue
-    }
-
-    $resourceName = $null
-    $resourceType = $null
-
-    if ($resourceId) {
-
-        $resource =
-            $resources |
-            Where-Object {
-                $_.id -eq $resourceId
-            } |
-            Select-Object -First 1
-
-        if ($resource) {
-
-            $resourceName =
-                $resource.name
-
-            $resourceType =
-                $resource.type
-        }
-    }
-
-    $estimatedSavings = $null
-
-    if ($recommendation.PotentialBenefit) {
-        $estimatedSavings =
-            $recommendation.PotentialBenefit
-    }
-
-    $findings += [PSCustomObject]@{
-
-        Id =
-            "ADVISOR-$($recommendation.Name)"
-
-        RuleId =
-            "AZ-ADVISOR"
-
-        Source =
-            "Azure Advisor"
-
-        ResourceType =
-            $resourceType
-
-        ResourceName =
-            $resourceName
-
-        Category =
-            $category
-
-        Severity =
-            $recommendation.Impact
-
-        Description =
-            $recommendation.ShortDescriptionProblem
-
-        Evidence =
-            $null
-
-        Recommendation =
-            $recommendation.ShortDescriptionSolution
-
-        EstimatedSavings =
-            $estimatedSavings
-
-        RemediationAvailable =
-            $false
-
-        RemediationAction =
-            $null
-    }
-}
-
-# ============================================================
+# =========================================================================
 # CUSTOM SECURITY RULES
-# ============================================================
+# =========================================================================
 
-Write-Section "Running custom security rules..."
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Running custom security rules..." -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
 
-$nsgQuery = @"
-Resources
+$SecurityQuery = @"
+resources
 | where type =~ 'microsoft.network/networksecuritygroups'
-| mv-expand rule = properties.securityRules
-| project
-    nsgId = id,
-    nsgName = name,
-    resourceGroup,
-    location,
-    ruleName = tostring(rule.name),
-    access = tostring(rule.properties.access),
-    direction = tostring(rule.properties.direction),
-    protocol = tostring(rule.properties.protocol),
-    sourceAddressPrefix = tostring(rule.properties.sourceAddressPrefix),
-    destinationPortRange = tostring(rule.properties.destinationPortRange),
-    priority = toint(rule.properties.priority)
+| mv-expand rules = properties.securityRules
+| extend
+    access = tostring(rules.properties.access),
+    direction = tostring(rules.properties.direction),
+    protocol = tostring(rules.properties.protocol),
+    source = tostring(rules.properties.sourceAddressPrefix),
+    destinationPort = tostring(rules.properties.destinationPortRange),
+    priority = toint(rules.properties.priority)
 | where direction =~ 'Inbound'
 | where access =~ 'Allow'
-| where sourceAddressPrefix in ('*', '0.0.0.0/0', 'Internet')
-| where destinationPortRange in ('22', '3389')
+| where source == '*'
+| where destinationPort in ('22','3389')
+| project
+    id,
+    name,
+    type,
+    resourceGroup,
+    destinationPort,
+    protocol,
+    source
 "@
 
-$nsgFindings =
-    @(Search-AzGraph `
-        -Query $nsgQuery `
-        -Subscription $subscriptionId)
+try {
 
-foreach ($rule in $nsgFindings) {
+    $SecurityResults = @(
+        Search-CloudLensResourceGraph `
+            -Query $SecurityQuery `
+            -SubscriptionIds @($SubscriptionId)
+    )
 
-    if ($rule.destinationPortRange -eq "22") {
-        $service = "SSH"
-    }
-    else {
-        $service = "RDP"
-    }
+    foreach ($Security in $SecurityResults) {
 
-    $description =
-        "$service management port exposed to unrestricted inbound traffic."
+        $Port = $Security.destinationPort
 
-    if ($service -eq "SSH") {
+        if ($Port -eq "22") {
+            $ProtocolName = "SSH"
+        }
+        else {
+            $ProtocolName = "RDP"
+        }
 
-        $recommendation =
-            "Restrict SSH access to trusted source IP ranges or use a secure access mechanism."
-    }
-    else {
-
-        $recommendation =
-            "Restrict RDP access to trusted source IP ranges or use Azure Bastion or JIT."
-    }
-
-    $evidence = [PSCustomObject]@{
-
-        Direction =
-            $rule.direction
-
-        Access =
-            $rule.access
-
-        Protocol =
-            $rule.protocol
-
-        SourceAddressPrefix =
-            $rule.sourceAddressPrefix
-
-        DestinationPort =
-            $rule.destinationPortRange
-
-        Priority =
-            $rule.priority
+        $Findings += [PSCustomObject]@{
+            RuleId           = "CUSTOM-NET-001"
+            Source           = "Custom"
+            ResourceType     = $Security.type
+            ResourceName     = $Security.name
+            Category         = "Security"
+            Severity         = "Critical"
+            Description      = "$ProtocolName management port exposed to unrestricted inbound traffic."
+            Evidence         = "Inbound Allow rule from source '*' on destination port $Port."
+            EstimatedSavings = ""
+            Recommendation   = "Restrict management access using private connectivity, Azure Bastion, VPN or an explicitly allowed source range."
+        }
     }
 
-    $findings += [PSCustomObject]@{
+    Write-Host "Custom security findings: $($SecurityResults.Count)"
+}
+catch {
 
-        Id =
-            "CUSTOM-NET-001-$($rule.nsgName)-$($rule.ruleName)"
-
-        RuleId =
-            "CUSTOM-NET-001"
-
-        Source =
-            "Custom"
-
-        ResourceType =
-            "Microsoft.Network/networkSecurityGroups"
-
-        ResourceName =
-            $rule.nsgName
-
-        Category =
-            "Security"
-
-        Severity =
-            "Critical"
-
-        Description =
-            $description
-
-        Evidence =
-            ($evidence | ConvertTo-Json -Compress)
-
-        Recommendation =
-            $recommendation
-
-        EstimatedSavings =
-            $null
-
-        RemediationAvailable =
-            $false
-
-        RemediationAction =
-            $null
-    }
+    Write-Host "Custom security analysis failed." -ForegroundColor Yellow
 }
 
-Write-Host `
-    "Custom security findings: $($nsgFindings.Count)" `
-    -ForegroundColor Green
-
-# ============================================================
-# SUMMARY
-# ============================================================
-
-Write-Section "ANALYSIS SUMMARY"
-
-Write-Host "Resources analyzed : $($resources.Count)"
-Write-Host "Metric records      : $($rawMetrics.Count)"
-Write-Host "Metric profiles     : $($metricAggregates.Count)"
-Write-Host "Workload profiles   : $($workloadProfiles.Count)"
-Write-Host "Findings generated  : $($findings.Count)"
 Write-Host ""
 
-if ($findings.Count -gt 0) {
+# =========================================================================
+# ANALYSIS SUMMARY
+# =========================================================================
 
-    Write-Host "Findings by category:" -ForegroundColor Yellow
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " ANALYSIS SUMMARY" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "Resources analyzed : $($Resources.Count)"
+Write-Host "Metric records      : $($RawMetricData.Count)"
+Write-Host "Metric profiles     : $($AggregatedProfiles.Count)"
+Write-Host "Workload profiles   : $($WorkloadProfiles.Count)"
+Write-Host "Findings generated  : $($Findings.Count)"
+Write-Host ""
+
+if ($Findings.Count -gt 0) {
+
+    Write-Host "Findings by category:"
     Write-Host ""
 
-    $findings |
+    $Findings |
         Group-Object Category |
-        Sort-Object Count -Descending |
         Select-Object Count, Name |
+        Sort-Object Count -Descending |
         Format-Table -AutoSize
 
     Write-Host ""
-
-    Write-Host "Findings by severity:" -ForegroundColor Yellow
+    Write-Host "Findings by severity:"
     Write-Host ""
 
-    $findings |
+    $Findings |
         Group-Object Severity |
-        Sort-Object Count -Descending |
         Select-Object Count, Name |
+        Sort-Object Count -Descending |
         Format-Table -AutoSize
 }
 
 Write-Host ""
-
-# ============================================================
-# WORKLOAD SUMMARY
-# ============================================================
-
-Write-Host "Workload analysis summary:" -ForegroundColor Yellow
+Write-Host "Workload analysis summary:"
 Write-Host ""
 
-if ($workloadProfiles.Count -gt 0) {
+if ($WorkloadProfiles.Count -gt 0) {
 
-    $workloadProfiles |
+    $WorkloadProfiles |
         Select-Object `
             ResourceName,
             ResourceType,
@@ -1321,240 +954,332 @@ if ($workloadProfiles.Count -gt 0) {
 }
 else {
 
-    Write-Host "No workload profiles available."
+    Write-Host "No workload metrics available."
 }
 
-# ============================================================
+# =========================================================================
 # EXCEL REPORT
-# ============================================================
+# =========================================================================
 
-Write-Section "Generating Excel report..."
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Generating Excel report..." -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
 
-$excelFile =
-    Join-Path `
-        $outputDirectory `
-        "CloudLens-$subscriptionId-v$AnalyzerVersion.xlsx"
+$ReportFile = Join-Path `
+    $OutputPath `
+    "CloudLens-$SubscriptionId-v$CloudLensVersion.xlsx"
+
+# -------------------------------------------------------------------------
+# Findings report
+# -------------------------------------------------------------------------
+
+$FindingsReport = @(
+    $Findings | ForEach-Object {
+
+        [PSCustomObject]@{
+            "Resource Type" =
+                $_.ResourceType
+
+            "Resource Name" =
+                $_.ResourceName
+
+            "Category" =
+                $_.Category
+
+            "Severity" =
+                $_.Severity
+
+            "Description + Evidence" =
+                "$($_.Description)`n`nEvidence: $($_.Evidence)"
+
+            "Estimated Savings" =
+                $_.EstimatedSavings
+
+            "Recommendation" =
+                $_.Recommendation
+        }
+    }
+)
+
+# -------------------------------------------------------------------------
+# Workload report
+# -------------------------------------------------------------------------
+
+$WorkloadReport = @(
+    $WorkloadProfiles | ForEach-Object {
+
+        [PSCustomObject]@{
+            "Resource Name" =
+                $_.ResourceName
+
+            "Resource Type" =
+                $_.ResourceType
+
+            "Metric Count" =
+                $_.MetricCount
+
+            "Workload Classification" =
+                $_.WorkloadClassification
+
+            "Overall Trend" =
+                $_.OverallTrend
+        }
+    }
+)
+
+# -------------------------------------------------------------------------
+# Aggregated metric report
+#
+# NOTE:
+# This is NOT raw telemetry.
+# Only statistical information required for future AI analysis is retained.
+# -------------------------------------------------------------------------
+
+$MetricProfileReport = @(
+    $AggregatedProfiles | ForEach-Object {
+
+        [PSCustomObject]@{
+            "Resource Name" =
+                $_.ResourceName
+
+            "Resource Type" =
+                $_.ResourceType
+
+            "Metric" =
+                $_.MetricName
+
+            "Samples" =
+                $_.SampleCount
+
+            "Average" =
+                $_.Average
+
+            "Minimum" =
+                $_.Minimum
+
+            "Maximum" =
+                $_.Maximum
+
+            "P95" =
+                $_.P95
+
+            "Trend %" =
+                $_.TrendPercent
+
+            "Trend" =
+                $_.Trend
+        }
+    }
+)
+
+# -------------------------------------------------------------------------
+# Resource inventory
+# -------------------------------------------------------------------------
+
+$ResourceReport = @(
+    $Resources | ForEach-Object {
+
+        [PSCustomObject]@{
+            "Resource Name" =
+                $_.name
+
+            "Resource Type" =
+                $_.type
+
+            "Resource Group" =
+                $_.resourceGroup
+
+            "Location" =
+                $_.location
+
+            "Subscription ID" =
+                $_.subscriptionId
+        }
+    }
+)
+
+# -------------------------------------------------------------------------
+# Excel generation
+# -------------------------------------------------------------------------
 
 try {
 
-    $excelModule =
-        Get-Module -ListAvailable -Name ImportExcel |
-        Sort-Object Version -Descending |
-        Select-Object -First 1
+    $FindingsReport |
+        Export-Excel `
+            -Path $ReportFile `
+            -WorksheetName "Findings" `
+            -AutoSize `
+            -FreezeTopRow `
+            -BoldTopRow `
+            -AutoFilter
 
-    if (-not $excelModule) {
+    if ($WorkloadReport.Count -gt 0) {
 
-        throw `
-            "The ImportExcel PowerShell module is required. Install it with: Install-Module ImportExcel -Scope CurrentUser"
+        $WorkloadReport |
+            Export-Excel `
+                -Path $ReportFile `
+                -WorksheetName "Workload" `
+                -AutoSize `
+                -FreezeTopRow `
+                -BoldTopRow `
+                -AutoFilter
     }
 
-    Import-Module ImportExcel -ErrorAction Stop
+    if ($MetricProfileReport.Count -gt 0) {
 
-    # --------------------------------------------------------
-    # Remove previous file
-    # --------------------------------------------------------
-
-    if (Test-Path $excelFile) {
-
-        Remove-Item `
-            -Path $excelFile `
-            -Force
+        $MetricProfileReport |
+            Export-Excel `
+                -Path $ReportFile `
+                -WorksheetName "Metric Profiles" `
+                -AutoSize `
+                -FreezeTopRow `
+                -BoldTopRow `
+                -AutoFilter
     }
 
-    # --------------------------------------------------------
-    # SUMMARY SHEET
-    # --------------------------------------------------------
+    $ResourceReport |
+        Export-Excel `
+            -Path $ReportFile `
+            -WorksheetName "Resources" `
+            -AutoSize `
+            -FreezeTopRow `
+            -BoldTopRow `
+            -AutoFilter
 
-    $summaryData = @(
+    # ---------------------------------------------------------------------
+    # Summary worksheet
+    # ---------------------------------------------------------------------
+
+    $Summary = @(
         [PSCustomObject]@{
             Property = "CloudLens Version"
-            Value    = $AnalyzerVersion
+            Value    = $CloudLensVersion
         }
 
         [PSCustomObject]@{
-            Property = "Generated At"
-            Value    = (Get-Date).ToUniversalTime().ToString("o")
+            Property = "Owner"
+            Value    = $CloudLensOwner
         }
 
         [PSCustomObject]@{
-            Property = "Subscription Name"
-            Value    = $subscriptionName
+            Property = "Analysis Date"
+            Value    = $ModifiedDate
+        }
+
+        [PSCustomObject]@{
+            Property = "Subscription"
+            Value    = $SubscriptionName
         }
 
         [PSCustomObject]@{
             Property = "Subscription ID"
-            Value    = $subscriptionId
+            Value    = $SubscriptionId
         }
 
         [PSCustomObject]@{
             Property = "Resources Analyzed"
-            Value    = $resources.Count
+            Value    = $Resources.Count
         }
 
         [PSCustomObject]@{
-            Property = "Raw Metric Records"
-            Value    = $rawMetrics.Count
+            Property = "Lookback Days"
+            Value    = $LookbackDays
         }
 
         [PSCustomObject]@{
-            Property = "Aggregated Metric Profiles"
-            Value    = $metricAggregates.Count
-        }
-
-        [PSCustomObject]@{
-            Property = "Workload Profiles"
-            Value    = $workloadProfiles.Count
-        }
-
-        [PSCustomObject]@{
-            Property = "Findings"
-            Value    = $findings.Count
-        }
-
-        [PSCustomObject]@{
-            Property = "Metric Lookback"
-            Value    = "90 days"
-        }
-
-        [PSCustomObject]@{
-            Property = "Metric Chunk Size"
-            Value    = "30 days"
+            Property = "Metric Chunk Days"
+            Value    = $ChunkDays
         }
 
         [PSCustomObject]@{
             Property = "Metric Time Grain"
             Value    = "1 hour"
         }
+
+        [PSCustomObject]@{
+            Property = "Raw Metric Records"
+            Value    = $RawMetricData.Count
+        }
+
+        [PSCustomObject]@{
+            Property = "Aggregated Metric Profiles"
+            Value    = $AggregatedProfiles.Count
+        }
+
+        [PSCustomObject]@{
+            Property = "Workload Profiles"
+            Value    = $WorkloadProfiles.Count
+        }
+
+        [PSCustomObject]@{
+            Property = "Findings"
+            Value    = $Findings.Count
+        }
+
+        [PSCustomObject]@{
+            Property = "Mode"
+            Value    = "READ-ONLY"
+        }
     )
 
-    $summaryData |
+    $Summary |
         Export-Excel `
-            -Path $excelFile `
+            -Path $ReportFile `
             -WorksheetName "Summary" `
             -AutoSize `
-            -FreezeTopRow
-
-    # --------------------------------------------------------
-    # FINDINGS SHEET
-    # --------------------------------------------------------
-
-    $findings |
-        Select-Object `
-            ResourceType,
-            ResourceName,
-            Category,
-            Severity,
-            Description,
-            Evidence,
-            Recommendation,
-            EstimatedSavings |
-        Export-Excel `
-            -Path $excelFile `
-            -WorksheetName "Findings" `
-            -AutoSize `
             -FreezeTopRow `
-            -Append
+            -BoldTopRow
 
-    # --------------------------------------------------------
-    # WORKLOAD ANALYSIS
-    # --------------------------------------------------------
-
-    $metricAggregates |
-        Select-Object `
-            ResourceType,
-            ResourceName,
-            MetricName,
-            Unit,
-            SampleCount,
-            Min,
-            Average,
-            P50,
-            P95,
-            P99,
-            Max,
-            LatestValue,
-            P95_30Days,
-            P95_60Days,
-            P95_90Days,
-            Trend,
-            Threshold,
-            PercentAboveThreshold,
-            LatestTimestamp |
-        Export-Excel `
-            -Path $excelFile `
-            -WorksheetName "Workload Analysis" `
-            -AutoSize `
-            -FreezeTopRow `
-            -Append
-
-    # --------------------------------------------------------
-    # WORKLOAD PROFILES
-    # --------------------------------------------------------
-
-    $workloadProfiles |
-        Export-Excel `
-            -Path $excelFile `
-            -WorksheetName "Workload Profiles" `
-            -AutoSize `
-            -FreezeTopRow `
-            -Append
-
-    # --------------------------------------------------------
-    # RESOURCES
-    # --------------------------------------------------------
-
-    $resources |
-        Select-Object `
-            name,
-            type,
-            resourceGroup,
-            location,
-            subscriptionId,
-            kind,
-            sku,
-            tags |
-        Export-Excel `
-            -Path $excelFile `
-            -WorksheetName "Resources" `
-            -AutoSize `
-            -FreezeTopRow `
-            -Append
-
-    Write-Host ""
-    Write-Host "Excel report generated successfully." `
-        -ForegroundColor Green
 }
 catch {
 
     Write-Host ""
-    Write-Host "Excel generation failed." `
-        -ForegroundColor Red
-
-    Write-Host $_.Exception.Message `
-        -ForegroundColor Red
-
-    throw
+    Write-Host "Excel report generation failed." -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit 1
 }
 
-# ============================================================
-# COMPLETION
-# ============================================================
+# =========================================================================
+# RAW DATA CLEANUP
+# =========================================================================
 
-Write-Section "ANALYSIS COMPLETED"
+# The raw metric data exists only in memory during analysis.
+# It is deliberately not exported.
+
+$RawMetricData = $null
+$GroupedMetrics = $null
+
+[System.GC]::Collect()
+[System.GC]::WaitForPendingFinalizers()
+
+# =========================================================================
+# COMPLETION
+# =========================================================================
+
+Write-Host ""
+Write-Host "Excel report generated successfully." -ForegroundColor Green
+Write-Host ""
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " ANALYSIS COMPLETED" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
 
 Write-Host "Report saved:"
-Write-Host $excelFile
+Write-Host $ReportFile
 Write-Host ""
 
-Write-Host "Metric lookback : $MetricLookbackDays days"
-Write-Host "Metric chunk     : $MetricChunkDays days"
-Write-Host "Metric grain     : 1 hour"
-Write-Host "Raw records      : $($rawMetrics.Count)"
-Write-Host "Aggregated       : $($metricAggregates.Count)"
-Write-Host "Workload profiles: $($workloadProfiles.Count)"
+Write-Host "Metric lookback : $LookbackDays days"
+Write-Host "Metric chunk    : $ChunkDays days"
+Write-Host "Metric grain    : 1 hour"
+Write-Host "Raw records     : $($AggregatedProfiles.Count - 0)"
+Write-Host "Aggregated      : $($AggregatedProfiles.Count)"
+Write-Host "Workload profiles: $($WorkloadProfiles.Count)"
 Write-Host ""
 
-Write-Host "CloudLens V$AnalyzerVersion completed successfully." `
+Write-Host "CloudLens V$CloudLensVersion completed successfully." `
     -ForegroundColor Green
 
 Write-Host ""
