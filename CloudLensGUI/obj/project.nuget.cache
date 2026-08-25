@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "dgSpecHash": "sdIDePBfRjE=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\francesco.leuci\\Documents\\CloudLens\\CloudLensGUI\\CloudLensGUI.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\azure.core\\1.49.0\\azure.core.1.49.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\azure.identity\\1.17.0\\azure.identity.1.17.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\azure.resourcemanager\\1.13.2\\azure.resourcemanager.1.13.2.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\azure.resourcemanager.resourcegraph\\1.1.0\\azure.resourcemanager.resourcegraph.1.1.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.bcl.asyncinterfaces\\8.0.0\\microsoft.bcl.asyncinterfaces.8.0.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\8.0.2\\microsoft.extensions.dependencyinjection.abstractions.8.0.2.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.extensions.logging.abstractions\\8.0.3\\microsoft.extensions.logging.abstractions.8.0.3.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.identity.client\\4.76.0\\microsoft.identity.client.4.76.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.identity.client.extensions.msal\\4.76.0\\microsoft.identity.client.extensions.msal.4.76.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.identitymodel.abstractions\\6.35.0\\microsoft.identitymodel.abstractions.6.35.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\system.clientmodel\\1.7.0\\system.clientmodel.1.7.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\system.diagnostics.diagnosticsource\\6.0.1\\system.diagnostics.diagnosticsource.6.0.1.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\system.memory.data\\8.0.1\\system.memory.data.8.0.1.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\system.runtime.compilerservices.unsafe\\6.0.0\\system.runtime.compilerservices.unsafe.6.0.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\system.security.cryptography.protecteddata\\4.5.0\\system.security.cryptography.protecteddata.4.5.0.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.30\\microsoft.netcore.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.30\\microsoft.windowsdesktop.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.30\\microsoft.aspnetcore.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\francesco.leuci\\.nuget\\packages\\microsoft.netcore.app.host.win-x64\\8.0.30\\microsoft.netcore.app.host.win-x64.8.0.30.nupkg.sha512"
+  ],
+  "logs": []
+}

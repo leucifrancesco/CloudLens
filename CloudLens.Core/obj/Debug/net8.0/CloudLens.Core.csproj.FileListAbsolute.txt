@@ -1,0 +1,13 @@
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\bin\Debug\net8.0\CloudLens.Core.deps.json
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\bin\Debug\net8.0\CloudLens.Core.dll
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\bin\Debug\net8.0\CloudLens.Core.pdb
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\CloudLens.Core.csproj.AssemblyReference.cache
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\CloudLens.Core.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\CloudLens.Core.AssemblyInfoInputs.cache
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\CloudLens.Core.AssemblyInfo.cs
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\CloudLens.Core.csproj.CoreCompileInputs.cache
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\CloudLens.Core.sourcelink.json
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\CloudLens.Core.dll
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\refint\CloudLens.Core.dll
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\CloudLens.Core.pdb
+C:\Users\francesco.leuci\Documents\CloudLens\CloudLens.Core\obj\Debug\net8.0\ref\CloudLens.Core.dll
