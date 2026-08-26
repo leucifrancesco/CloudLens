@@ -23,7 +23,6 @@ public sealed class AssessmentEngine
         }
     }
 
-
     // =========================================================
     // ASSESSMENT
     // =========================================================
@@ -33,20 +32,19 @@ public sealed class AssessmentEngine
         AzureSubscription subscription)
     {
         if (resources == null)
+        {
             throw new ArgumentNullException(
                 nameof(resources));
+        }
 
         if (subscription == null)
+        {
             throw new ArgumentNullException(
                 nameof(subscription));
+        }
 
         var findings =
             new List<Finding>();
-
-
-        // -----------------------------------------------------
-        // ESECUZIONE ANALYZER
-        // -----------------------------------------------------
 
         foreach (var analyzer in _analyzers)
         {
@@ -56,39 +54,40 @@ public sealed class AssessmentEngine
                     subscription);
 
             if (analyzerFindings == null)
+            {
                 continue;
+            }
 
             findings.AddRange(
                 analyzerFindings);
         }
 
-
-        // -----------------------------------------------------
-        // STATISTICHE RISORSE
-        // -----------------------------------------------------
+        // Evita duplicati accidentali della stessa regola
+        // sulla stessa risorsa.
+        findings =
+            findings
+                .GroupBy(
+                    f => new
+                    {
+                        f.RuleId,
+                        f.ResourceId,
+                        f.ResourceName
+                    })
+                .Select(
+                    g => g.First())
+                .ToList();
 
         var stats =
             BuildStats(resources);
 
-
-        // -----------------------------------------------------
-        // SCORE
-        // -----------------------------------------------------
-
         var scores =
             ComputeScores(findings);
-
 
         var overallScore =
             scores.Count == 0
                 ? 100
                 : (int)Math.Round(
                     scores.Values.Average());
-
-
-        // -----------------------------------------------------
-        // RESULT
-        // -----------------------------------------------------
 
         return new ScanResult
         {
@@ -111,7 +110,6 @@ public sealed class AssessmentEngine
                 overallScore
         };
     }
-
 
     // =========================================================
     // RESOURCE STATISTICS
@@ -153,10 +151,15 @@ public sealed class AssessmentEngine
                 resources.Count(
                     r => TypeEquals(
                         r,
-                        "Microsoft.Storage/storageAccounts"))
+                        "Microsoft.Storage/storageAccounts")),
+
+            Advisor =
+                0,
+
+            MonthlyCostEur =
+                0
         };
     }
-
 
     // =========================================================
     // SCORE
@@ -173,8 +176,8 @@ public sealed class AssessmentEngine
         {
             var penalty =
                 findings
-                    .Where(f =>
-                        f.Category == category)
+                    .Where(
+                        f => f.Category == category)
                     .Sum(
                         f =>
                             f.Severity switch
@@ -194,7 +197,6 @@ public sealed class AssessmentEngine
 
         return result;
     }
-
 
     // =========================================================
     // HELPERS

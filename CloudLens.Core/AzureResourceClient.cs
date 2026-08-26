@@ -20,8 +20,15 @@ public sealed class AzureResourceClient
         HttpClient http,
         string token)
     {
-        _http = http;
-        _token = token;
+        _http =
+            http ?? throw new ArgumentNullException(nameof(http));
+
+        _token =
+            string.IsNullOrWhiteSpace(token)
+                ? throw new ArgumentException(
+                    "Access token obbligatorio.",
+                    nameof(token))
+                : token;
     }
 
     // =========================================================
@@ -61,7 +68,6 @@ public sealed class AzureResourceClient
 
         return JsonDocument.Parse(body);
     }
-
 
     // =========================================================
     // SUBSCRIPTIONS
@@ -124,20 +130,16 @@ public sealed class AzureResourceClient
                 }
             }
 
-            url = null;
-
-            if (json.RootElement.TryGetProperty(
+            url =
+                json.RootElement.TryGetProperty(
                     "nextLink",
-                    out var nextLink))
-            {
-                url =
-                    nextLink.GetString();
-            }
+                    out var nextLink)
+                    ? nextLink.GetString()
+                    : null;
         }
 
         return result;
     }
-
 
     // =========================================================
     // RESOURCE GRAPH DISCOVERY
@@ -148,8 +150,7 @@ public sealed class AzureResourceClient
             string subscriptionId,
             CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(
-                subscriptionId))
+        if (string.IsNullOrWhiteSpace(subscriptionId))
         {
             throw new ArgumentException(
                 "Subscription ID obbligatorio.",
@@ -163,6 +164,8 @@ public sealed class AzureResourceClient
 
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var query =
                 new
                 {
@@ -191,8 +194,7 @@ public sealed class AzureResourceClient
                     options =
                         new
                         {
-                            resultFormat =
-                                "objectArray"
+                            resultFormat = "objectArray"
                         },
 
                     skipToken
@@ -227,8 +229,7 @@ public sealed class AzureResourceClient
                     tokenElement.GetString();
             }
 
-            if (string.IsNullOrWhiteSpace(
-                    skipToken))
+            if (string.IsNullOrWhiteSpace(skipToken))
             {
                 break;
             }
@@ -236,7 +237,6 @@ public sealed class AzureResourceClient
 
         return resources;
     }
-
 
     // =========================================================
     // RESOURCE GRAPH POST
@@ -248,8 +248,7 @@ public sealed class AzureResourceClient
             CancellationToken cancellationToken)
     {
         var jsonContent =
-            JsonSerializer.Serialize(
-                query);
+            JsonSerializer.Serialize(query);
 
         using var content =
             new StringContent(
@@ -290,7 +289,6 @@ public sealed class AzureResourceClient
         return JsonDocument.Parse(body);
     }
 
-
     // =========================================================
     // SINGLE RESOURCE
     // =========================================================
@@ -301,16 +299,14 @@ public sealed class AzureResourceClient
             string apiVersion,
             CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(
-                resourceId))
+        if (string.IsNullOrWhiteSpace(resourceId))
         {
             throw new ArgumentException(
                 "Resource ID obbligatorio.",
                 nameof(resourceId));
         }
 
-        if (string.IsNullOrWhiteSpace(
-                apiVersion))
+        if (string.IsNullOrWhiteSpace(apiVersion))
         {
             throw new ArgumentException(
                 "API version obbligatoria.",
@@ -319,7 +315,7 @@ public sealed class AzureResourceClient
 
         var url =
             $"{ArmBase}{resourceId}" +
-            $"?api-version=" +
+            "?api-version=" +
             $"{Uri.EscapeDataString(apiVersion)}";
 
         using var json =
@@ -330,7 +326,6 @@ public sealed class AzureResourceClient
         return json.RootElement.Clone();
     }
 }
-
 
 public sealed record AzureSubscription(
     string Id,

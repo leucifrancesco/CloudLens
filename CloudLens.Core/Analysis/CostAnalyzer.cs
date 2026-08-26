@@ -9,37 +9,46 @@ public sealed class CostAnalyzer : IAnalyzer
         IReadOnlyList<JsonElement> resources,
         AzureSubscription subscription)
     {
-        var findings = new List<Finding>();
+        var findings =
+            new List<Finding>();
 
-        AnalyzeUnattachedDisks(resources, findings);
-        AnalyzeOrphanPublicIps(resources, findings);
+        AnalyzeUnattachedDisks(
+            resources,
+            findings);
+
+        AnalyzeOrphanPublicIps(
+            resources,
+            findings);
+
+        AnalyzeUnusedManagedDisks(
+            resources,
+            findings);
 
         return findings;
     }
 
-
-    // ---------------------------------------------------------
-    // DISCHI NON COLLEGATI
-    // ---------------------------------------------------------
+    // =========================================================
+    // UNATTACHED DISKS
+    // =========================================================
 
     private static void AnalyzeUnattachedDisks(
         IReadOnlyList<JsonElement> resources,
         List<Finding> findings)
     {
         var disks =
-            resources
-                .Where(r =>
-                    TypeEquals(
-                        r,
-                        "Microsoft.Compute/disks"))
-                .ToList();
+            resources.Where(
+                r => TypeEquals(
+                    r,
+                    "Microsoft.Compute/disks"));
 
         foreach (var resource in disks)
         {
             if (!resource.TryGetProperty(
                     "properties",
                     out var properties))
+            {
                 continue;
+            }
 
             var managedBy =
                 GetString(
@@ -47,7 +56,14 @@ public sealed class CostAnalyzer : IAnalyzer
                     "managedBy");
 
             if (!string.IsNullOrWhiteSpace(managedBy))
+            {
                 continue;
+            }
+
+            var diskState =
+                GetString(
+                    properties,
+                    "diskState");
 
             findings.Add(
                 new Finding(
@@ -85,7 +101,8 @@ public sealed class CostAnalyzer : IAnalyzer
                         ResourceType(resource),
 
                     MonthlySavingEur:
-                        0,
+                        EstimateDiskSaving(
+                            properties),
 
                     AzureCli:
                         $"az disk delete " +
@@ -93,39 +110,40 @@ public sealed class CostAnalyzer : IAnalyzer
         }
     }
 
-
-    // ---------------------------------------------------------
-    // PUBLIC IP NON ASSOCIATI
-    // ---------------------------------------------------------
+    // =========================================================
+    // ORPHAN PUBLIC IP
+    // =========================================================
 
     private static void AnalyzeOrphanPublicIps(
         IReadOnlyList<JsonElement> resources,
         List<Finding> findings)
     {
         var publicIps =
-            resources
-                .Where(r =>
-                    TypeEquals(
-                        r,
-                        "Microsoft.Network/publicIPAddresses"))
-                .ToList();
+            resources.Where(
+                r => TypeEquals(
+                    r,
+                    "Microsoft.Network/publicIPAddresses"));
 
         foreach (var resource in publicIps)
         {
             if (!resource.TryGetProperty(
                     "properties",
                     out var properties))
+            {
                 continue;
+            }
 
             var ipConfiguration =
                 GetProperty(
                     properties,
                     "ipConfiguration");
 
-            if (ipConfiguration.HasValue &&
+            if (!ipConfiguration.HasValue ||
                 ipConfiguration.Value.ValueKind !=
-                    JsonValueKind.Null)
+                JsonValueKind.Null)
+            {
                 continue;
+            }
 
             findings.Add(
                 new Finding(
@@ -167,10 +185,96 @@ public sealed class CostAnalyzer : IAnalyzer
         }
     }
 
+    // =========================================================
+    // MANAGED DISK STATE
+    // =========================================================
 
-    // ---------------------------------------------------------
+    private static void AnalyzeUnusedManagedDisks(
+        IReadOnlyList<JsonElement> resources,
+        List<Finding> findings)
+    {
+        var disks =
+            resources.Where(
+                r => TypeEquals(
+                    r,
+                    "Microsoft.Compute/disks"));
+
+        foreach (var resource in disks)
+        {
+            if (!resource.TryGetProperty(
+                    "properties",
+                    out var properties))
+            {
+                continue;
+            }
+
+            var managedBy =
+                GetString(
+                    properties,
+                    "managedBy");
+
+            var diskState =
+                GetString(
+                    properties,
+                    "diskState");
+
+            if (!string.IsNullOrWhiteSpace(managedBy) ||
+                !string.Equals(
+                    diskState,
+                    "Unattached",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // DISK-UNATTACHED ha già identificato il disco.
+            // Evitiamo un secondo finding duplicato.
+        }
+    }
+
+    // =========================================================
+    // COST ESTIMATION
+    // =========================================================
+
+    private static double EstimateDiskSaving(
+        JsonElement properties)
+    {
+        if (!properties.TryGetProperty(
+                "diskSizeGB",
+                out var sizeElement))
+        {
+            return 0;
+        }
+
+        if (!sizeElement.TryGetDouble(
+                out var sizeGb))
+        {
+            return 0;
+        }
+
+        if (sizeGb <= 0)
+        {
+            return 0;
+        }
+
+        /*
+         * Stima volutamente conservativa.
+         *
+         * Non viene presentato come prezzo Azure ufficiale:
+         * serve soltanto per quantificare l'ordine di grandezza
+         * del possibile saving.
+         */
+        const double estimatedEurPerGbMonth =
+            0.06;
+
+        return Math.Round(
+            sizeGb * estimatedEurPerGbMonth,
+            2);
+    }
+
+    // =========================================================
     // HELPERS
-    // ---------------------------------------------------------
+    // =========================================================
 
     private static bool TypeEquals(
         JsonElement resource,
@@ -182,7 +286,6 @@ public sealed class CostAnalyzer : IAnalyzer
             StringComparison.OrdinalIgnoreCase);
     }
 
-
     private static string ResourceName(
         JsonElement resource)
     {
@@ -191,7 +294,6 @@ public sealed class CostAnalyzer : IAnalyzer
                    "name")
                ?? "Unknown";
     }
-
 
     private static string ResourceType(
         JsonElement resource)
@@ -202,7 +304,6 @@ public sealed class CostAnalyzer : IAnalyzer
                ?? "Unknown";
     }
 
-
     private static string ResourceId(
         JsonElement resource)
     {
@@ -211,7 +312,6 @@ public sealed class CostAnalyzer : IAnalyzer
                    "id")
                ?? "";
     }
-
 
     private static string? GetString(
         JsonElement element,
@@ -225,7 +325,6 @@ public sealed class CostAnalyzer : IAnalyzer
                 : value.ToString()
             : null;
     }
-
 
     private static JsonElement? GetProperty(
         JsonElement element,

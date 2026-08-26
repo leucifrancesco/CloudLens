@@ -58,10 +58,6 @@ public sealed class AzureCollector
 
     // =========================================================
     // INTERACTIVE ASSESSMENT
-    //
-    // IMPORTANTE:
-    // Il token viene ricevuto dall'esterno.
-    // NON viene eseguita una nuova autenticazione.
     // =========================================================
 
     public async Task<ScanResult>
@@ -83,37 +79,15 @@ public sealed class AzureCollector
                 nameof(subscription));
         }
 
-        var client =
-            new AzureResourceClient(
-                _http,
-                token);
-
-
-        // -----------------------------------------------------
-        // RESOURCE DISCOVERY
-        // -----------------------------------------------------
-
-        var resources =
-            await client.GetResourcesAsync(
-                subscription.Id,
-                cancellationToken);
-
-
-        // -----------------------------------------------------
-        // ANALYSIS
-        // -----------------------------------------------------
-
-        return _assessmentEngine.Analyze(
-            resources,
-            subscription);
+        return await ScanWithTokenAsync(
+            token,
+            subscription,
+            cancellationToken);
     }
 
 
     // =========================================================
     // SERVICE PRINCIPAL AUTHENTICATION
-    //
-    // Manteniamo questa modalità per utilizzi futuri,
-    // anche se la GUI attualmente utilizza Interactive Login.
     // =========================================================
 
     public async Task<List<AzureSubscription>>
@@ -199,11 +173,199 @@ public sealed class AzureCollector
 
 
         // -----------------------------------------------------
+        // METRIC COLLECTION
+        // -----------------------------------------------------
+
+        var monitorClient =
+            new AzureMonitorClient(
+                _http,
+                token);
+
+        var metricProfiles =
+            await monitorClient.GetMetricsAsync(
+                resources,
+                cancellationToken);
+
+
+        // -----------------------------------------------------
         // ANALYSIS
         // -----------------------------------------------------
 
-        return _assessmentEngine.Analyze(
+        var result =
+            _assessmentEngine.Analyze(
+                resources,
+                subscription);
+
+
+        // -----------------------------------------------------
+        // METRICS
+        // -----------------------------------------------------
+
+        result.MetricProfiles =
+            metricProfiles;
+
+
+        // -----------------------------------------------------
+        // DIAGNOSTICS
+        // -----------------------------------------------------
+
+        PrintScanDiagnostics(
             resources,
-            subscription);
+            metricProfiles);
+
+
+        return result;
+    }
+
+
+    // =========================================================
+    // DIAGNOSTICS
+    // =========================================================
+
+    private static void PrintScanDiagnostics(
+        IReadOnlyList<JsonElement> resources,
+        IReadOnlyList<MetricProfile> metricProfiles)
+    {
+        Console.WriteLine();
+
+        Console.WriteLine(
+            "=========================================================");
+
+        Console.WriteLine(
+            "CLOUDLENS - AZURE DISCOVERY");
+
+        Console.WriteLine(
+            "=========================================================");
+
+        Console.WriteLine(
+            $"Risorse scoperte : {resources.Count}");
+
+        Console.WriteLine(
+            $"Metriche raccolte: {metricProfiles.Count}");
+
+        Console.WriteLine();
+
+
+        // -----------------------------------------------------
+        // RESOURCES BY TYPE
+        // -----------------------------------------------------
+
+        Console.WriteLine(
+            "RISORSE PER RESOURCE TYPE:");
+
+        Console.WriteLine();
+
+        var resourceGroups =
+            resources
+                .GroupBy(
+                    x =>
+                        x.TryGetProperty(
+                            "type",
+                            out var type)
+                            ? type.GetString() ?? "Unknown"
+                            : "Unknown",
+                    StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(
+                    x => x.Count());
+
+        foreach (var group in resourceGroups)
+        {
+            Console.WriteLine(
+                $"{group.Key} -> {group.Count()}");
+        }
+
+
+        Console.WriteLine();
+
+
+        // -----------------------------------------------------
+        // METRICS BY RESOURCE TYPE
+        // -----------------------------------------------------
+
+        Console.WriteLine(
+            "METRICHE PER RESOURCE TYPE:");
+
+        Console.WriteLine();
+
+        var metricGroups =
+            metricProfiles
+                .GroupBy(
+                    x => x.ResourceType,
+                    StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(
+                    x => x.Count());
+
+        foreach (var group in metricGroups)
+        {
+            Console.WriteLine(
+                $"{group.Key} -> {group.Count()}");
+        }
+
+
+        Console.WriteLine();
+
+
+        // -----------------------------------------------------
+        // UNIQUE METRIC TYPES
+        // -----------------------------------------------------
+
+        Console.WriteLine(
+            "METRICHE UNICHE:");
+
+        Console.WriteLine();
+
+        var metricNames =
+            metricProfiles
+                .GroupBy(
+                    x =>
+                        $"{x.ResourceType}|{x.MetricName}",
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(
+                    x => x.First())
+                .OrderBy(
+                    x => x.ResourceType)
+                .ThenBy(
+                    x => x.MetricName)
+                .ToList();
+
+        foreach (var metric in
+                 metricNames.Take(100))
+        {
+            Console.WriteLine(
+                $"{metric.ResourceType} | " +
+                $"{metric.MetricName} | " +
+                $"{metric.Unit}");
+        }
+
+
+        Console.WriteLine();
+
+
+        // -----------------------------------------------------
+        // FIRST 20 PROFILES
+        // -----------------------------------------------------
+
+        Console.WriteLine(
+            "PRIME 20 METRICHE RACCOLTE:");
+
+        Console.WriteLine();
+
+        foreach (var metric in
+                 metricProfiles.Take(20))
+        {
+            Console.WriteLine(
+                $"{metric.ResourceName} | " +
+                $"{metric.MetricDisplayName} | " +
+                $"Avg={metric.Average:F2} | " +
+                $"Min={metric.Minimum:F2} | " +
+                $"Max={metric.Maximum:F2} | " +
+                $"Samples={metric.SampleCount}");
+        }
+
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            "=========================================================");
     }
 }

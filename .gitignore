@@ -1,16 +1,18 @@
 # CloudLens generated output
 output/
 
+# .NET / Visual Studio build artifacts
+bin/
+obj/
+.vs/
+.vscode/
+
 # PowerShell
 *.log
 
 # Temporary files
 *.tmp
 *.temp
-
-# Visual Studio / VS Code
-.vs/
-.vscode/
 
 # OS files
 Thumbs.db

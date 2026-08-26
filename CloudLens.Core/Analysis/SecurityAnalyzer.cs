@@ -9,49 +9,63 @@ public sealed class SecurityAnalyzer : IAnalyzer
         IReadOnlyList<JsonElement> resources,
         AzureSubscription subscription)
     {
-        var findings = new List<Finding>();
+        var findings =
+            new List<Finding>();
 
-        AnalyzeNsgs(resources, findings);
-        AnalyzeStorageAccounts(resources, findings);
+        AnalyzeNsgs(
+            resources,
+            findings);
+
+        AnalyzeStorageAccounts(
+            resources,
+            findings);
+
+        AnalyzePublicIpAddresses(
+            resources,
+            findings);
 
         return findings;
     }
 
-
-    // ---------------------------------------------------------
-    // NSG - RDP / SSH aperti a Internet
-    // ---------------------------------------------------------
+    // =========================================================
+    // NSG
+    // =========================================================
 
     private static void AnalyzeNsgs(
         IReadOnlyList<JsonElement> resources,
         List<Finding> findings)
     {
         var nsgs =
-            resources
-                .Where(r =>
-                    TypeEquals(
-                        r,
-                        "Microsoft.Network/networkSecurityGroups"))
-                .ToList();
+            resources.Where(
+                r => TypeEquals(
+                    r,
+                    "Microsoft.Network/networkSecurityGroups"));
 
         foreach (var resource in nsgs)
         {
             if (!resource.TryGetProperty(
                     "properties",
                     out var properties))
+            {
                 continue;
+            }
 
             if (!properties.TryGetProperty(
                     "securityRules",
-                    out var rules))
+                    out var rules) ||
+                rules.ValueKind != JsonValueKind.Array)
+            {
                 continue;
+            }
 
             foreach (var rule in rules.EnumerateArray())
             {
                 if (!rule.TryGetProperty(
                         "properties",
                         out var ruleProperties))
+                {
                     continue;
+                }
 
                 var access =
                     GetString(
@@ -77,24 +91,27 @@ public sealed class SecurityAnalyzer : IAnalyzer
                         access,
                         "Allow",
                         StringComparison.OrdinalIgnoreCase))
+                {
                     continue;
+                }
 
                 if (!string.Equals(
                         direction,
                         "Inbound",
                         StringComparison.OrdinalIgnoreCase))
+                {
                     continue;
+                }
 
-                var dangerousPort =
-                    destinationPort is "22" or "3389";
-
-                var internet =
-                    source is "*" or
-                        "Internet" or
-                        "0.0.0.0/0";
-
-                if (!dangerousPort || !internet)
+                if (!IsInternetSource(source))
+                {
                     continue;
+                }
+
+                if (!IsManagementPort(destinationPort))
+                {
+                    continue;
+                }
 
                 var portName =
                     destinationPort == "3389"
@@ -129,7 +146,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
 
                         Recommendation:
                             "Limitare la sorgente a reti autorizzate " +
-                            "oppure utilizzare Azure Bastion/JIT.",
+                            "oppure utilizzare Azure Bastion o JIT.",
 
                         ResourceName:
                             ResourceName(resource),
@@ -145,29 +162,28 @@ public sealed class SecurityAnalyzer : IAnalyzer
         }
     }
 
-
-    // ---------------------------------------------------------
-    // Storage Account - accesso pubblico ai blob
-    // ---------------------------------------------------------
+    // =========================================================
+    // STORAGE PUBLIC ACCESS
+    // =========================================================
 
     private static void AnalyzeStorageAccounts(
         IReadOnlyList<JsonElement> resources,
         List<Finding> findings)
     {
         var storageAccounts =
-            resources
-                .Where(r =>
-                    TypeEquals(
-                        r,
-                        "Microsoft.Storage/storageAccounts"))
-                .ToList();
+            resources.Where(
+                r => TypeEquals(
+                    r,
+                    "Microsoft.Storage/storageAccounts"));
 
         foreach (var resource in storageAccounts)
         {
             if (!resource.TryGetProperty(
                     "properties",
                     out var properties))
+            {
                 continue;
+            }
 
             var publicAccess =
                 GetBool(
@@ -175,7 +191,9 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     "allowBlobPublicAccess");
 
             if (publicAccess != true)
+            {
                 continue;
+            }
 
             findings.Add(
                 new Finding(
@@ -200,7 +218,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
 
                     Impact:
                         "Configurazione che può consentire " +
-                        "esposizione involontaria di dati.",
+                        "l'esposizione involontaria di dati.",
 
                     Recommendation:
                         "Disabilitare l'accesso pubblico ai blob e " +
@@ -219,10 +237,113 @@ public sealed class SecurityAnalyzer : IAnalyzer
         }
     }
 
+    // =========================================================
+    // PUBLIC IP
+    // =========================================================
 
-    // ---------------------------------------------------------
-    // Helpers
-    // ---------------------------------------------------------
+    private static void AnalyzePublicIpAddresses(
+        IReadOnlyList<JsonElement> resources,
+        List<Finding> findings)
+    {
+        var publicIps =
+            resources.Where(
+                r => TypeEquals(
+                    r,
+                    "Microsoft.Network/publicIPAddresses"));
+
+        foreach (var resource in publicIps)
+        {
+            if (!resource.TryGetProperty(
+                    "properties",
+                    out var properties))
+            {
+                continue;
+            }
+
+            var ipConfiguration =
+                GetProperty(
+                    properties,
+                    "ipConfiguration");
+
+            if (!ipConfiguration.HasValue)
+            {
+                continue;
+            }
+
+            if (ipConfiguration.Value.ValueKind !=
+                JsonValueKind.Null)
+            {
+                continue;
+            }
+
+            findings.Add(
+                new Finding(
+                    Id:
+                        Guid.NewGuid().ToString(),
+
+                    Category:
+                        Category.Security,
+
+                    Severity:
+                        Severity.Medium,
+
+                    RuleId:
+                        "PIP-UNASSOCIATED",
+
+                    Title:
+                        "Public IP non associato",
+
+                    Description:
+                        $"L'IP pubblico '{ResourceName(resource)}' " +
+                        "non risulta associato ad alcuna risorsa.",
+
+                    Impact:
+                        "Una risorsa pubblicamente indirizzabile " +
+                        "può rimanere inutilizzata o dimenticata.",
+
+                    Recommendation:
+                        "Verificare l'utilizzo dell'indirizzo e " +
+                        "rimuoverlo se non necessario.",
+
+                    ResourceName:
+                        ResourceName(resource),
+
+                    ResourceType:
+                        ResourceType(resource)));
+        }
+    }
+
+    // =========================================================
+    // HELPERS
+    // =========================================================
+
+    private static bool IsManagementPort(
+        string? port)
+    {
+        if (string.IsNullOrWhiteSpace(port))
+        {
+            return false;
+        }
+
+        return port == "22" ||
+               port == "3389" ||
+               port == "*" ||
+               port.Contains(
+                   "22",
+                   StringComparison.OrdinalIgnoreCase) ||
+               port.Contains(
+                   "3389",
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsInternetSource(
+        string? source)
+    {
+        return source is "*" or
+            "Internet" or
+            "0.0.0.0/0" or
+            "::/0";
+    }
 
     private static bool TypeEquals(
         JsonElement resource,
@@ -234,7 +355,6 @@ public sealed class SecurityAnalyzer : IAnalyzer
             StringComparison.OrdinalIgnoreCase);
     }
 
-
     private static string ResourceName(
         JsonElement resource)
     {
@@ -243,7 +363,6 @@ public sealed class SecurityAnalyzer : IAnalyzer
                    "name")
                ?? "Unknown";
     }
-
 
     private static string ResourceType(
         JsonElement resource)
@@ -254,7 +373,6 @@ public sealed class SecurityAnalyzer : IAnalyzer
                ?? "Unknown";
     }
 
-
     private static string ResourceId(
         JsonElement resource)
     {
@@ -263,7 +381,6 @@ public sealed class SecurityAnalyzer : IAnalyzer
                    "id")
                ?? "";
     }
-
 
     private static string ResourceGroup(
         JsonElement resource)
@@ -279,18 +396,16 @@ public sealed class SecurityAnalyzer : IAnalyzer
         var index =
             Array.FindIndex(
                 parts,
-                p =>
-                    string.Equals(
-                        p,
-                        "resourceGroups",
-                        StringComparison.OrdinalIgnoreCase));
+                p => string.Equals(
+                    p,
+                    "resourceGroups",
+                    StringComparison.OrdinalIgnoreCase));
 
         return index >= 0 &&
                index + 1 < parts.Length
             ? parts[index + 1]
             : "";
     }
-
 
     private static string? GetString(
         JsonElement element,
@@ -305,7 +420,6 @@ public sealed class SecurityAnalyzer : IAnalyzer
             : null;
     }
 
-
     private static bool? GetBool(
         JsonElement element,
         string property)
@@ -313,12 +427,26 @@ public sealed class SecurityAnalyzer : IAnalyzer
         if (!element.TryGetProperty(
                 property,
                 out var value))
+        {
             return null;
+        }
 
-        return value.ValueKind == JsonValueKind.True
-            ? true
-            : value.ValueKind == JsonValueKind.False
-                ? false
-                : null;
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null
+        };
+    }
+
+    private static JsonElement? GetProperty(
+        JsonElement element,
+        string property)
+    {
+        return element.TryGetProperty(
+                property,
+                out var value)
+            ? value
+            : null;
     }
 }

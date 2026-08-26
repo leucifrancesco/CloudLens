@@ -89,17 +89,6 @@ public partial class MainWindow : Window
             // LOGIN + SUBSCRIPTION DISCOVERY
             // -------------------------------------------------
 
-            /*
-             * IMPORTANTE:
-             *
-             * In questa fase abbiamo bisogno sia delle
-             * subscription sia dell'access token.
-             *
-             * Per questo recuperiamo il token direttamente
-             * dall'AzureAuthenticator e poi utilizziamo lo
-             * stesso token per la discovery.
-             */
-
             var authenticator =
                 new AzureAuthenticator(_http);
 
@@ -168,12 +157,6 @@ public partial class MainWindow : Window
 
             StatusText.Text =
                 $"Autenticazione riuscita. {_subscriptions.Count} subscription disponibili.";
-
-            /*
-             * Niente popup di conferma.
-             *
-             * Lo stato è già visibile nella GUI.
-             */
         }
         catch (Exception ex)
         {
@@ -271,15 +254,6 @@ public partial class MainWindow : Window
             // ASSESSMENT CON TOKEN ESISTENTE
             // -------------------------------------------------
 
-            /*
-             * IMPORTANTE:
-             *
-             * NON viene effettuato un nuovo login.
-             *
-             * Viene utilizzato lo stesso access token
-             * ottenuto durante Login_Click().
-             */
-
             var result =
                 await _collector.ScanInteractiveAsync(
                     _accessToken,
@@ -375,5 +349,8 @@ public partial class MainWindow : Window
 
         FindingsGrid.ItemsSource =
             result.Findings;
+
+        MetricsGrid.ItemsSource =
+            result.MetricProfiles;
     }
 }

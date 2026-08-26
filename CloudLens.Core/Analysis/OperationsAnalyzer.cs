@@ -9,9 +9,15 @@ public sealed class OperationsAnalyzer : IAnalyzer
         IReadOnlyList<JsonElement> resources,
         AzureSubscription subscription)
     {
-        var findings = new List<Finding>();
+        var findings =
+            new List<Finding>();
 
         AnalyzeMissingTags(
+            resources,
+            subscription,
+            findings);
+
+        AnalyzeMissingLocation(
             resources,
             subscription,
             findings);
@@ -19,10 +25,9 @@ public sealed class OperationsAnalyzer : IAnalyzer
         return findings;
     }
 
-
-    // ---------------------------------------------------------
-    // RISORSE SENZA TAG
-    // ---------------------------------------------------------
+    // =========================================================
+    // TAGGING
+    // =========================================================
 
     private static void AnalyzeMissingTags(
         IReadOnlyList<JsonElement> resources,
@@ -30,21 +35,16 @@ public sealed class OperationsAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var untagged =
-            resources.Count(
-                r =>
-                    !r.TryGetProperty(
-                        "tags",
-                        out var tags) ||
-                    tags.ValueKind ==
-                        JsonValueKind.Null ||
-                    (
-                        tags.ValueKind ==
-                            JsonValueKind.Object &&
-                        !tags.EnumerateObject().Any()
-                    ));
+            resources
+                .Where(
+                    r =>
+                        !HasTags(r))
+                .ToList();
 
-        if (untagged <= 0)
+        if (untagged.Count == 0)
+        {
             return;
+        }
 
         findings.Add(
             new Finding(
@@ -61,10 +61,10 @@ public sealed class OperationsAnalyzer : IAnalyzer
                     "GOV-NO-TAGS",
 
                 Title:
-                    $"{untagged} risorse prive di tag",
+                    $"{untagged.Count} risorse prive di tag",
 
                 Description:
-                    $"{untagged} risorse su {resources.Count} " +
+                    $"{untagged.Count} risorse su {resources.Count} " +
                     "non hanno tag di governance.",
 
                 Impact:
@@ -80,5 +80,104 @@ public sealed class OperationsAnalyzer : IAnalyzer
 
                 ResourceType:
                     "Microsoft.Resources/subscriptions"));
+    }
+
+    // =========================================================
+    // LOCATION
+    // =========================================================
+
+    private static void AnalyzeMissingLocation(
+        IReadOnlyList<JsonElement> resources,
+        AzureSubscription subscription,
+        List<Finding> findings)
+    {
+        var invalid =
+            resources.Count(
+                r =>
+                {
+                    var location =
+                        GetString(
+                            r,
+                            "location");
+
+                    return string.IsNullOrWhiteSpace(
+                        location);
+                });
+
+        if (invalid == 0)
+        {
+            return;
+        }
+
+        findings.Add(
+            new Finding(
+                Id:
+                    Guid.NewGuid().ToString(),
+
+                Category:
+                    Category.Operations,
+
+                Severity:
+                    Severity.Low,
+
+                RuleId:
+                    "GOV-NO-LOCATION",
+
+                Title:
+                    $"{invalid} risorse senza location",
+
+                Description:
+                    $"{invalid} risorse non espongono una " +
+                    "location valida nella discovery.",
+
+                Impact:
+                    "Può complicare governance, inventory e " +
+                    "analisi geografica dell'ambiente.",
+
+                Recommendation:
+                    "Verificare la risorsa e la modalità con cui " +
+                    "viene esposta da Azure Resource Manager.",
+
+                ResourceName:
+                    subscription.Name,
+
+                ResourceType:
+                    "Microsoft.Resources/subscriptions"));
+    }
+
+    // =========================================================
+    // HELPERS
+    // =========================================================
+
+    private static bool HasTags(
+        JsonElement resource)
+    {
+        if (!resource.TryGetProperty(
+                "tags",
+                out var tags))
+        {
+            return false;
+        }
+
+        if (tags.ValueKind !=
+            JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        return tags.EnumerateObject().Any();
+    }
+
+    private static string? GetString(
+        JsonElement element,
+        string property)
+    {
+        return element.TryGetProperty(
+                property,
+                out var value)
+            && value.ValueKind ==
+                JsonValueKind.String
+            ? value.GetString()
+            : null;
     }
 }
