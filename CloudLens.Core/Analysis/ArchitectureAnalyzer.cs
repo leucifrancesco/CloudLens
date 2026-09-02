@@ -6,7 +6,7 @@ namespace CloudLens.Core.Analysis;
 public sealed class ArchitectureAnalyzer : IAnalyzer
 {
     public IEnumerable<Finding> Analyze(
-        IReadOnlyList<JsonElement> resources,
+        IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
         var findings =
@@ -33,7 +33,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
     // =========================================================
 
     private static void AnalyzeVmPublicIpArchitecture(
-        IReadOnlyList<JsonElement> resources,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var vms =
@@ -44,9 +44,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
 
         foreach (var vm in vms)
         {
-            if (!vm.TryGetProperty(
-                    "properties",
-                    out var properties))
+            if (vm.Properties is not JsonElement properties)
             {
                 continue;
             }
@@ -68,23 +66,30 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
 
             foreach (var nic in interfaces.EnumerateArray())
             {
+                if (!nic.TryGetProperty(
+                        "id",
+                        out var nicIdElement) ||
+                    nicIdElement.ValueKind !=
+                    JsonValueKind.String)
+                {
+                    continue;
+                }
+
                 var nicId =
-                    GetString(
-                        nic,
-                        "id");
+                    nicIdElement.GetString();
 
                 if (string.IsNullOrWhiteSpace(nicId))
                 {
                     continue;
                 }
 
-                // Resource Graph contiene già le NIC come risorse
-                // quando sono presenti nell'inventory.
+                // La NIC viene verificata contro il modello
+                // normalizzato delle risorse scoperte.
                 var hasNic =
                     resources.Any(
                         r =>
                             string.Equals(
-                                GetString(r, "id"),
+                                r.Id,
                                 nicId,
                                 StringComparison.OrdinalIgnoreCase));
 
@@ -101,7 +106,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
     // =========================================================
 
     private static void AnalyzeStorageReplication(
-        IReadOnlyList<JsonElement> resources,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var storageAccounts =
@@ -112,17 +117,22 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
 
         foreach (var storage in storageAccounts)
         {
-            if (!storage.TryGetProperty(
-                    "sku",
-                    out var sku))
+            if (storage.Sku is not JsonElement sku)
+            {
+                continue;
+            }
+
+            if (!sku.TryGetProperty(
+                    "name",
+                    out var skuNameElement) ||
+                skuNameElement.ValueKind !=
+                JsonValueKind.String)
             {
                 continue;
             }
 
             var skuName =
-                GetString(
-                    sku,
-                    "name");
+                skuNameElement.GetString();
 
             if (string.IsNullOrWhiteSpace(skuName))
             {
@@ -151,7 +161,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                             "Storage Account con replica LRS",
 
                         Description:
-                            $"Lo storage account '{ResourceName(storage)}' " +
+                            $"Lo storage account '{storage.Name}' " +
                             "utilizza una replica LRS.",
 
                         Impact:
@@ -164,10 +174,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                             "requisiti di disponibilità e disaster recovery.",
 
                         ResourceName:
-                            ResourceName(storage),
+                            storage.Name,
 
                         ResourceType:
-                            ResourceType(storage)));
+                            storage.Type));
             }
         }
     }
@@ -177,16 +187,14 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
     // =========================================================
 
     private static void AnalyzeBasicResourceDistribution(
-        IReadOnlyList<JsonElement> resources,
+        IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription,
         List<Finding> findings)
     {
         var locations =
             resources
                 .Select(
-                    r => GetString(
-                        r,
-                        "location"))
+                    r => r.Location)
                 .Where(
                     x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(
@@ -242,45 +250,12 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
     // =========================================================
 
     private static bool TypeEquals(
-        JsonElement resource,
+        AzureResource resource,
         string type)
     {
         return string.Equals(
-            GetString(
-                resource,
-                "type"),
+            resource.Type,
             type,
             StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string ResourceName(
-        JsonElement resource)
-    {
-        return GetString(
-                   resource,
-                   "name")
-               ?? "Unknown";
-    }
-
-    private static string ResourceType(
-        JsonElement resource)
-    {
-        return GetString(
-                   resource,
-                   "type")
-               ?? "Unknown";
-    }
-
-    private static string? GetString(
-        JsonElement element,
-        string property)
-    {
-        return element.TryGetProperty(
-                property,
-                out var value)
-            && value.ValueKind ==
-                JsonValueKind.String
-            ? value.GetString()
-            : null;
     }
 }

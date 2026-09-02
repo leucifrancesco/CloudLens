@@ -1,4 +1,4 @@
-using System.Text.Json;
+using CloudLens.Core;
 using CloudLens.Core.Analysis;
 
 namespace CloudLens.Core.Azure;
@@ -8,7 +8,6 @@ public sealed class AzureCollector
     private readonly HttpClient _http;
 
     private readonly AssessmentEngine _assessmentEngine;
-
 
     public AzureCollector(
         HttpClient http)
@@ -26,7 +25,6 @@ public sealed class AzureCollector
                 new ArchitectureAnalyzer()
             ]);
     }
-
 
     // =========================================================
     // INTERACTIVE AUTHENTICATION + SUBSCRIPTION DISCOVERY
@@ -54,7 +52,6 @@ public sealed class AzureCollector
         return await client.GetSubscriptionsAsync(
             cancellationToken);
     }
-
 
     // =========================================================
     // INTERACTIVE ASSESSMENT
@@ -84,7 +81,6 @@ public sealed class AzureCollector
             subscription,
             cancellationToken);
     }
-
 
     // =========================================================
     // SERVICE PRINCIPAL AUTHENTICATION
@@ -116,7 +112,6 @@ public sealed class AzureCollector
             cancellationToken);
     }
 
-
     // =========================================================
     // SERVICE PRINCIPAL SCAN
     // =========================================================
@@ -129,6 +124,12 @@ public sealed class AzureCollector
             AzureSubscription subscription,
             CancellationToken cancellationToken = default)
     {
+        if (subscription == null)
+        {
+            throw new ArgumentNullException(
+                nameof(subscription));
+        }
+
         var authenticator =
             new AzureAuthenticator(_http);
 
@@ -145,7 +146,6 @@ public sealed class AzureCollector
             cancellationToken);
     }
 
-
     // =========================================================
     // COMMON TOKEN-BASED SCAN
     // =========================================================
@@ -156,21 +156,59 @@ public sealed class AzureCollector
             AzureSubscription subscription,
             CancellationToken cancellationToken)
     {
-        var client =
-            new AzureResourceClient(
-                _http,
-                token);
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new ArgumentException(
+                "Access token obbligatorio.",
+                nameof(token));
+        }
 
+        if (subscription == null)
+        {
+            throw new ArgumentNullException(
+                nameof(subscription));
+        }
 
         // -----------------------------------------------------
         // RESOURCE DISCOVERY
         // -----------------------------------------------------
 
+        var client =
+            new AzureResourceClient(
+                _http,
+                token);
+
         var resources =
-            await client.GetResourcesAsync(
+            await client.GetAzureResourcesAsync(
                 subscription.Id,
                 cancellationToken);
 
+        // -----------------------------------------------------
+        // ARM RESOURCE ENRICHMENT
+        // -----------------------------------------------------
+
+        var enricher =
+            new AzureResourceEnricher(
+                _http,
+                token);
+
+        await enricher.EnrichAsync(
+            resources,
+            cancellationToken);
+
+        // -----------------------------------------------------
+        // RESOURCE RELATIONSHIPS
+        // -----------------------------------------------------
+
+        var relationshipBuilder =
+            new AzureRelationshipBuilder();
+
+        relationshipBuilder.Build(
+            resources);
+
+        var resourceGraph =
+            new AzureResourceGraph(
+                resources);
 
         // -----------------------------------------------------
         // METRIC COLLECTION
@@ -181,21 +219,33 @@ public sealed class AzureCollector
                 _http,
                 token);
 
+        var rawResources =
+            resources
+                .Select(
+                    x => x.Raw)
+                .ToList();
+
         var metricProfiles =
             await monitorClient.GetMetricsAsync(
-                resources,
+                rawResources,
                 cancellationToken);
-
 
         // -----------------------------------------------------
         // ANALYSIS
+        // -----------------------------------------------------
+        //
+        // Gli analyzer lavorano ora direttamente con il modello
+        // normalizzato AzureResource.
+        //
+        // Raw viene mantenuto esclusivamente dove necessario
+        // per componenti che non sono ancora stati migrati,
+        // come la raccolta delle metriche.
         // -----------------------------------------------------
 
         var result =
             _assessmentEngine.Analyze(
                 resources,
                 subscription);
-
 
         // -----------------------------------------------------
         // METRICS
@@ -204,27 +254,26 @@ public sealed class AzureCollector
         result.MetricProfiles =
             metricProfiles;
 
-
         // -----------------------------------------------------
         // DIAGNOSTICS
         // -----------------------------------------------------
 
         PrintScanDiagnostics(
             resources,
-            metricProfiles);
-
+            metricProfiles,
+            resourceGraph);
 
         return result;
     }
-
 
     // =========================================================
     // DIAGNOSTICS
     // =========================================================
 
     private static void PrintScanDiagnostics(
-        IReadOnlyList<JsonElement> resources,
-        IReadOnlyList<MetricProfile> metricProfiles)
+        IReadOnlyList<AzureResource> resources,
+        IReadOnlyList<MetricProfile> metricProfiles,
+        AzureResourceGraph resourceGraph)
     {
         Console.WriteLine();
 
@@ -245,6 +294,28 @@ public sealed class AzureCollector
 
         Console.WriteLine();
 
+        // -----------------------------------------------------
+        // RESOURCE ENRICHMENT
+        // -----------------------------------------------------
+
+        var enrichedCount =
+            resources.Count(
+                x =>
+                    x.Enrichment?.Success == true);
+
+        Console.WriteLine(
+            "ARM ENRICHMENT:");
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"Risorse arricchite: {enrichedCount}");
+
+        Console.WriteLine(
+            $"Risorse non arricchite: " +
+            $"{resources.Count - enrichedCount}");
+
+        Console.WriteLine();
 
         // -----------------------------------------------------
         // RESOURCES BY TYPE
@@ -258,12 +329,7 @@ public sealed class AzureCollector
         var resourceGroups =
             resources
                 .GroupBy(
-                    x =>
-                        x.TryGetProperty(
-                            "type",
-                            out var type)
-                            ? type.GetString() ?? "Unknown"
-                            : "Unknown",
+                    x => x.Type,
                     StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(
                     x => x.Count());
@@ -274,9 +340,74 @@ public sealed class AzureCollector
                 $"{group.Key} -> {group.Count()}");
         }
 
+        Console.WriteLine();
+
+        // -----------------------------------------------------
+        // RELATIONSHIPS
+        // -----------------------------------------------------
+
+        Console.WriteLine(
+            "RESOURCE RELATIONSHIPS:");
 
         Console.WriteLine();
 
+        var relationshipGroups =
+            resources
+                .SelectMany(
+                    x => x.Relationships)
+                .GroupBy(
+                    x => x.RelationshipType,
+                    StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(
+                    x => x.Count());
+
+        var totalRelationships =
+            0;
+
+        foreach (var group in relationshipGroups)
+        {
+            Console.WriteLine(
+                $"{group.Key} -> {group.Count()}");
+
+            totalRelationships +=
+                group.Count();
+        }
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"Relazioni totali: {totalRelationships}");
+
+        // -----------------------------------------------------
+        // GRAPH TEST
+        // -----------------------------------------------------
+
+        var vmCount =
+            resourceGraph
+                .GetResources(
+                    "Microsoft.Compute/virtualMachines")
+                .Count;
+
+        var nicCount =
+            resourceGraph
+                .GetResources(
+                    "Microsoft.Network/networkInterfaces")
+                .Count;
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            "RESOURCE GRAPH:");
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"VM nel graph : {vmCount}");
+
+        Console.WriteLine(
+            $"NIC nel graph: {nicCount}");
+
+        Console.WriteLine();
 
         // -----------------------------------------------------
         // METRICS BY RESOURCE TYPE
@@ -301,9 +432,7 @@ public sealed class AzureCollector
                 $"{group.Key} -> {group.Count()}");
         }
 
-
         Console.WriteLine();
-
 
         // -----------------------------------------------------
         // UNIQUE METRIC TYPES
@@ -337,12 +466,10 @@ public sealed class AzureCollector
                 $"{metric.Unit}");
         }
 
-
         Console.WriteLine();
 
-
         // -----------------------------------------------------
-        // FIRST 20 PROFILES
+        // FIRST 20 METRIC PROFILES
         // -----------------------------------------------------
 
         Console.WriteLine(
@@ -361,7 +488,6 @@ public sealed class AzureCollector
                 $"Max={metric.Maximum:F2} | " +
                 $"Samples={metric.SampleCount}");
         }
-
 
         Console.WriteLine();
 

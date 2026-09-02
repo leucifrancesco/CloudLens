@@ -1,4 +1,3 @@
-using System.Text.Json;
 using CloudLens.Core.Azure;
 
 namespace CloudLens.Core.Analysis;
@@ -27,9 +26,9 @@ public sealed class AssessmentEngine
     // ASSESSMENT
     // =========================================================
 
-    public ScanResult Analyze(
-        IReadOnlyList<JsonElement> resources,
-        AzureSubscription subscription)
+public ScanResult Analyze(
+    IReadOnlyList<AzureResource> resources,
+    AzureSubscription subscription)
     {
         if (resources == null)
         {
@@ -115,8 +114,8 @@ public sealed class AssessmentEngine
     // RESOURCE STATISTICS
     // =========================================================
 
-    private static ScanStats BuildStats(
-        IReadOnlyList<JsonElement> resources)
+private static ScanStats BuildStats(
+    IReadOnlyList<AzureResource> resources)
     {
         return new ScanStats
         {
@@ -203,16 +202,12 @@ public sealed class AssessmentEngine
     // =========================================================
 
     private static bool TypeEquals(
-        JsonElement resource,
+        AzureResource resource,
         string type)
     {
-        return resource.TryGetProperty(
-                   "type",
-                   out var typeElement)
-               &&
-               string.Equals(
-                   typeElement.GetString(),
-                   type,
-                   StringComparison.OrdinalIgnoreCase);
+        return string.Equals(
+            resource.Type,
+            type,
+            StringComparison.OrdinalIgnoreCase);
     }
 }

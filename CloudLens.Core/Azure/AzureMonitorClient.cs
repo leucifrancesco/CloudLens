@@ -29,7 +29,6 @@ public sealed class AzureMonitorClient
 
     private readonly string _token;
 
-
     public AzureMonitorClient(
         HttpClient http,
         string token)
@@ -47,11 +46,6 @@ public sealed class AzureMonitorClient
 
         _token = token;
     }
-
-
-    // =========================================================
-    // PUBLIC API
-    // =========================================================
 
     public async Task<List<MetricProfile>> GetMetricsAsync(
         IReadOnlyList<JsonElement> resources,
@@ -87,11 +81,6 @@ public sealed class AzureMonitorClient
             .ThenBy(x => x.MetricName)
             .ToList();
     }
-
-
-    // =========================================================
-    // RESOURCE METRICS
-    // =========================================================
 
     private async Task CollectResourceMetricsAsync(
         JsonElement resource,
@@ -140,15 +129,6 @@ public sealed class AzureMonitorClient
                     return;
                 }
 
-                /*
-                 * Azure Monitor può restituire molte metriche
-                 * per una singola risorsa.
-                 *
-                 * Non chiediamo tutte le metriche in una sola
-                 * query: costruiamo piccoli gruppi per evitare
-                 * URL e risposte eccessivamente grandi.
-                 */
-
                 foreach (var definition in definitions)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -171,11 +151,6 @@ public sealed class AzureMonitorClient
                     }
                     catch
                     {
-                        /*
-                         * Una singola metrica non disponibile
-                         * non deve interrompere la raccolta
-                         * delle altre metriche della risorsa.
-                         */
                     }
                 }
             }
@@ -190,19 +165,8 @@ public sealed class AzureMonitorClient
         }
         catch
         {
-            /*
-             * Alcuni resource provider non espongono metriche
-             * tramite l'endpoint standard.
-             *
-             * Questo è normale e non deve bloccare lo scan.
-             */
         }
     }
-
-
-    // =========================================================
-    // METRIC DEFINITIONS
-    // =========================================================
 
     private async Task<List<MetricDefinition>>
         GetMetricDefinitionsAsync(
@@ -298,11 +262,6 @@ public sealed class AzureMonitorClient
             return [];
         }
     }
-
-
-    // =========================================================
-    // SINGLE METRIC
-    // =========================================================
 
     private async Task<List<MetricProfile>> GetMetricAsync(
         string resourceId,
@@ -512,11 +471,6 @@ public sealed class AzureMonitorClient
         return result;
     }
 
-
-    // =========================================================
-    // REQUEST CREATION
-    // =========================================================
-
     private HttpRequestMessage CreateRequest(
         HttpMethod method,
         string url)
@@ -537,11 +491,6 @@ public sealed class AzureMonitorClient
 
         return request;
     }
-
-
-    // =========================================================
-    // HELPERS
-    // =========================================================
 
     private static void AddMetricValue(
         JsonElement point,
@@ -570,7 +519,6 @@ public sealed class AzureMonitorClient
         }
     }
 
-
     private static string? GetString(
         JsonElement element,
         string property)
@@ -583,7 +531,6 @@ public sealed class AzureMonitorClient
                 ? value.GetString()
                 : null;
     }
-
 
     private static string? GetString(
         JsonElement element,
@@ -609,11 +556,6 @@ public sealed class AzureMonitorClient
             ? child.GetString()
             : null;
     }
-
-
-    // =========================================================
-    // INTERNAL MODEL
-    // =========================================================
 
     private sealed record MetricDefinition(
         string Name,

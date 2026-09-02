@@ -1,183 +1,145 @@
-using System.Text.Json;
 using CloudLens.Core.Azure;
 
 namespace CloudLens.Core.Analysis;
 
 public sealed class OperationsAnalyzer : IAnalyzer
 {
-    public IEnumerable<Finding> Analyze(
-        IReadOnlyList<JsonElement> resources,
-        AzureSubscription subscription)
+public IEnumerable<Finding> Analyze(
+IReadOnlyList<AzureResource> resources,
+AzureSubscription subscription)
+{
+var findings =
+new List<Finding>();
+
+    AnalyzeMissingTags(
+        resources,
+        subscription,
+        findings);
+
+    AnalyzeMissingLocation(
+        resources,
+        subscription,
+        findings);
+
+    return findings;
+}
+
+// =========================================================
+// TAGGING
+// =========================================================
+
+private static void AnalyzeMissingTags(
+    IReadOnlyList<AzureResource> resources,
+    AzureSubscription subscription,
+    List<Finding> findings)
+{
+    var untagged =
+        resources
+            .Where(
+                resource =>
+                    resource.Tags.Count == 0)
+            .ToList();
+
+    if (untagged.Count == 0)
     {
-        var findings =
-            new List<Finding>();
-
-        AnalyzeMissingTags(
-            resources,
-            subscription,
-            findings);
-
-        AnalyzeMissingLocation(
-            resources,
-            subscription,
-            findings);
-
-        return findings;
+        return;
     }
 
-    // =========================================================
-    // TAGGING
-    // =========================================================
+    findings.Add(
+        new Finding(
+            Id:
+                Guid.NewGuid().ToString(),
 
-    private static void AnalyzeMissingTags(
-        IReadOnlyList<JsonElement> resources,
-        AzureSubscription subscription,
-        List<Finding> findings)
+            Category:
+                Category.Operations,
+
+            Severity:
+                Severity.Medium,
+
+            RuleId:
+                "GOV-NO-TAGS",
+
+            Title:
+                $"{untagged.Count} risorse prive di tag",
+
+            Description:
+                $"{untagged.Count} risorse su {resources.Count} " +
+                "non hanno tag di governance.",
+
+            Impact:
+                "Riduce la capacità di attribuire costi, " +
+                "ownership e ambiente.",
+
+            Recommendation:
+                "Definire uno standard di tagging e applicarlo " +
+                "tramite Azure Policy.",
+
+            ResourceName:
+                subscription.Name,
+
+            ResourceType:
+                "Microsoft.Resources/subscriptions",
+
+            ResourceId:
+                subscription.Id));
+}
+
+// =========================================================
+// LOCATION
+// =========================================================
+
+private static void AnalyzeMissingLocation(
+    IReadOnlyList<AzureResource> resources,
+    AzureSubscription subscription,
+    List<Finding> findings)
+{
+    var invalid =
+        resources.Count(
+            resource =>
+                string.IsNullOrWhiteSpace(
+                    resource.Location));
+
+    if (invalid == 0)
     {
-        var untagged =
-            resources
-                .Where(
-                    r =>
-                        !HasTags(r))
-                .ToList();
-
-        if (untagged.Count == 0)
-        {
-            return;
-        }
-
-        findings.Add(
-            new Finding(
-                Id:
-                    Guid.NewGuid().ToString(),
-
-                Category:
-                    Category.Operations,
-
-                Severity:
-                    Severity.Medium,
-
-                RuleId:
-                    "GOV-NO-TAGS",
-
-                Title:
-                    $"{untagged.Count} risorse prive di tag",
-
-                Description:
-                    $"{untagged.Count} risorse su {resources.Count} " +
-                    "non hanno tag di governance.",
-
-                Impact:
-                    "Riduce la capacità di attribuire costi, " +
-                    "ownership e ambiente.",
-
-                Recommendation:
-                    "Definire uno standard di tagging e applicarlo " +
-                    "tramite Azure Policy.",
-
-                ResourceName:
-                    subscription.Name,
-
-                ResourceType:
-                    "Microsoft.Resources/subscriptions"));
+        return;
     }
 
-    // =========================================================
-    // LOCATION
-    // =========================================================
+    findings.Add(
+        new Finding(
+            Id:
+                Guid.NewGuid().ToString(),
 
-    private static void AnalyzeMissingLocation(
-        IReadOnlyList<JsonElement> resources,
-        AzureSubscription subscription,
-        List<Finding> findings)
-    {
-        var invalid =
-            resources.Count(
-                r =>
-                {
-                    var location =
-                        GetString(
-                            r,
-                            "location");
+            Category:
+                Category.Operations,
 
-                    return string.IsNullOrWhiteSpace(
-                        location);
-                });
+            Severity:
+                Severity.Low,
 
-        if (invalid == 0)
-        {
-            return;
-        }
+            RuleId:
+                "GOV-NO-LOCATION",
 
-        findings.Add(
-            new Finding(
-                Id:
-                    Guid.NewGuid().ToString(),
+            Title:
+                $"{invalid} risorse senza location",
 
-                Category:
-                    Category.Operations,
+            Description:
+                $"{invalid} risorse non espongono una " +
+                "location valida nella discovery.",
 
-                Severity:
-                    Severity.Low,
+            Impact:
+                "Può complicare governance, inventory e " +
+                "analisi geografica dell'ambiente.",
 
-                RuleId:
-                    "GOV-NO-LOCATION",
+            Recommendation:
+                "Verificare la risorsa e la modalità con cui " +
+                "viene esposta da Azure Resource Manager.",
 
-                Title:
-                    $"{invalid} risorse senza location",
+            ResourceName:
+                subscription.Name,
 
-                Description:
-                    $"{invalid} risorse non espongono una " +
-                    "location valida nella discovery.",
+            ResourceType:
+                "Microsoft.Resources/subscriptions",
 
-                Impact:
-                    "Può complicare governance, inventory e " +
-                    "analisi geografica dell'ambiente.",
-
-                Recommendation:
-                    "Verificare la risorsa e la modalità con cui " +
-                    "viene esposta da Azure Resource Manager.",
-
-                ResourceName:
-                    subscription.Name,
-
-                ResourceType:
-                    "Microsoft.Resources/subscriptions"));
-    }
-
-    // =========================================================
-    // HELPERS
-    // =========================================================
-
-    private static bool HasTags(
-        JsonElement resource)
-    {
-        if (!resource.TryGetProperty(
-                "tags",
-                out var tags))
-        {
-            return false;
-        }
-
-        if (tags.ValueKind !=
-            JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        return tags.EnumerateObject().Any();
-    }
-
-    private static string? GetString(
-        JsonElement element,
-        string property)
-    {
-        return element.TryGetProperty(
-                property,
-                out var value)
-            && value.ValueKind ==
-                JsonValueKind.String
-            ? value.GetString()
-            : null;
-    }
+            ResourceId:
+                subscription.Id));
+}
 }
