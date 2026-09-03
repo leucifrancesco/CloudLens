@@ -7,16 +7,21 @@ public sealed class AzureResourceGraph
     public AzureResourceGraph(
         IReadOnlyList<AzureResource> resources)
     {
+        if (resources == null)
+            throw new ArgumentNullException(nameof(resources));
+
         _resourcesById =
             resources
                 .Where(
-                    x => !string.IsNullOrWhiteSpace(x.Id))
+                    resource =>
+                        !string.IsNullOrWhiteSpace(resource.Id))
                 .GroupBy(
-                    x => NormalizeId(x.Id),
+                    resource =>
+                        NormalizeId(resource.Id),
                     StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    x => x.Key,
-                    x => x.First(),
+                    group => group.Key,
+                    group => group.First(),
                     StringComparer.OrdinalIgnoreCase);
     }
 
@@ -38,21 +43,111 @@ public sealed class AzureResourceGraph
     public IReadOnlyList<AzureResource> GetResources(
         string resourceType)
     {
+        if (string.IsNullOrWhiteSpace(resourceType))
+        {
+            return [];
+        }
+
         return _resourcesById
             .Values
             .Where(
-                x =>
+                resource =>
                     string.Equals(
-                        x.Type,
+                        resource.Type,
                         resourceType,
                         StringComparison.OrdinalIgnoreCase))
             .ToList();
+    }
+
+    public IReadOnlyList<AzureResourceRelationship>
+        GetRelationships(
+            AzureResource resource)
+    {
+        if (resource == null)
+            throw new ArgumentNullException(nameof(resource));
+
+        return resource.Relationships
+            .ToList();
+    }
+
+    public IReadOnlyList<AzureResourceRelationship>
+        GetRelationships(
+            AzureResource resource,
+            string relationshipType)
+    {
+        if (resource == null)
+            throw new ArgumentNullException(nameof(resource));
+
+        if (string.IsNullOrWhiteSpace(relationshipType))
+        {
+            return [];
+        }
+
+        return resource.Relationships
+            .Where(
+                relationship =>
+                    string.Equals(
+                        relationship.RelationshipType,
+                        relationshipType,
+                        StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    public IReadOnlyList<AzureResourceRelationship>
+        GetAllRelationships()
+    {
+        return _resourcesById
+            .Values
+            .SelectMany(
+                resource => resource.Relationships)
+            .ToList();
+    }
+
+    public bool HasRelationship(
+        AzureResource source,
+        string relationshipType,
+        AzureResource target)
+    {
+        if (source == null)
+            throw new ArgumentNullException(nameof(source));
+
+        if (target == null)
+            throw new ArgumentNullException(nameof(target));
+
+        if (string.IsNullOrWhiteSpace(relationshipType))
+        {
+            return false;
+        }
+
+        var normalizedTargetId =
+            NormalizeId(target.Id);
+
+        return source.Relationships.Any(
+            relationship =>
+                string.Equals(
+                    relationship.RelationshipType,
+                    relationshipType,
+                    StringComparison.OrdinalIgnoreCase)
+                &&
+                string.Equals(
+                    NormalizeId(
+                        relationship.TargetResourceId),
+                    normalizedTargetId,
+                    StringComparison.OrdinalIgnoreCase));
     }
 
     public IReadOnlyList<AzureResource> GetRelatedResources(
         AzureResource resource,
         string relationshipType)
     {
+        if (resource == null)
+            throw new ArgumentNullException(nameof(resource));
+
+        if (string.IsNullOrWhiteSpace(relationshipType))
+        {
+            return [];
+        }
+
         var result =
             new List<AzureResource>();
 
@@ -77,7 +172,7 @@ public sealed class AzureResourceGraph
             }
         }
 
-        return result;
+        return DistinctResources(result);
     }
 
     public AzureResource? GetRelatedResource(
@@ -94,6 +189,14 @@ public sealed class AzureResourceGraph
         AzureResource resource,
         string relationshipType)
     {
+        if (resource == null)
+            throw new ArgumentNullException(nameof(resource));
+
+        if (string.IsNullOrWhiteSpace(relationshipType))
+        {
+            return [];
+        }
+
         var normalizedId =
             NormalizeId(resource.Id);
 
@@ -104,8 +207,8 @@ public sealed class AzureResourceGraph
                     candidate.Relationships.Any(
                         relationship =>
                             string.Equals(
-                                relationship.TargetResourceId
-                                    .TrimEnd('/'),
+                                NormalizeId(
+                                    relationship.TargetResourceId),
                                 normalizedId,
                                 StringComparison.OrdinalIgnoreCase)
                             &&
@@ -121,6 +224,14 @@ public sealed class AzureResourceGraph
         string targetType,
         params string[] relationshipTypes)
     {
+        if (source == null)
+            throw new ArgumentNullException(nameof(source));
+
+        if (string.IsNullOrWhiteSpace(targetType))
+        {
+            return false;
+        }
+
         if (relationshipTypes.Length == 0)
         {
             return string.Equals(
@@ -129,7 +240,7 @@ public sealed class AzureResourceGraph
                 StringComparison.OrdinalIgnoreCase);
         }
 
-        var current =
+        IReadOnlyList<AzureResource> current =
             new List<AzureResource>
             {
                 source
@@ -138,6 +249,11 @@ public sealed class AzureResourceGraph
         foreach (var relationshipType in
                  relationshipTypes)
         {
+            if (string.IsNullOrWhiteSpace(relationshipType))
+            {
+                return false;
+            }
+
             var next =
                 new List<AzureResource>();
 
@@ -149,25 +265,19 @@ public sealed class AzureResourceGraph
                         relationshipType));
             }
 
-            if (next.Count == 0)
+            current =
+                DistinctResources(next);
+
+            if (current.Count == 0)
             {
                 return false;
             }
-
-            current =
-                next
-                    .GroupBy(
-                        x => NormalizeId(x.Id),
-                        StringComparer.OrdinalIgnoreCase)
-                    .Select(
-                        x => x.First())
-                    .ToList();
         }
 
         return current.Any(
-            x =>
+            resource =>
                 string.Equals(
-                    x.Type,
+                    resource.Type,
                     targetType,
                     StringComparison.OrdinalIgnoreCase));
     }
@@ -177,6 +287,14 @@ public sealed class AzureResourceGraph
         string targetType,
         params string[] relationshipTypes)
     {
+        if (source == null)
+            throw new ArgumentNullException(nameof(source));
+
+        if (string.IsNullOrWhiteSpace(targetType))
+        {
+            return [];
+        }
+
         if (relationshipTypes.Length == 0)
         {
             return string.Equals(
@@ -187,7 +305,7 @@ public sealed class AzureResourceGraph
                 : [];
         }
 
-        var current =
+        IReadOnlyList<AzureResource> current =
             new List<AzureResource>
             {
                 source
@@ -196,6 +314,11 @@ public sealed class AzureResourceGraph
         foreach (var relationshipType in
                  relationshipTypes)
         {
+            if (string.IsNullOrWhiteSpace(relationshipType))
+            {
+                return [];
+            }
+
             var next =
                 new List<AzureResource>();
 
@@ -208,13 +331,7 @@ public sealed class AzureResourceGraph
             }
 
             current =
-                next
-                    .GroupBy(
-                        x => NormalizeId(x.Id),
-                        StringComparer.OrdinalIgnoreCase)
-                    .Select(
-                        x => x.First())
-                    .ToList();
+                DistinctResources(next);
 
             if (current.Count == 0)
             {
@@ -224,9 +341,9 @@ public sealed class AzureResourceGraph
 
         return current
             .Where(
-                x =>
+                resource =>
                     string.Equals(
-                        x.Type,
+                        resource.Type,
                         targetType,
                         StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -237,6 +354,14 @@ public sealed class AzureResourceGraph
         string targetType,
         params string[] relationshipTypes)
     {
+        if (target == null)
+            throw new ArgumentNullException(nameof(target));
+
+        if (string.IsNullOrWhiteSpace(targetType))
+        {
+            return [];
+        }
+
         if (relationshipTypes.Length == 0)
         {
             return string.Equals(
@@ -247,7 +372,7 @@ public sealed class AzureResourceGraph
                 : [];
         }
 
-        var current =
+        IReadOnlyList<AzureResource> current =
             new List<AzureResource>
             {
                 target
@@ -256,6 +381,11 @@ public sealed class AzureResourceGraph
         foreach (var relationshipType in
                  relationshipTypes)
         {
+            if (string.IsNullOrWhiteSpace(relationshipType))
+            {
+                return [];
+            }
+
             var next =
                 new List<AzureResource>();
 
@@ -268,13 +398,7 @@ public sealed class AzureResourceGraph
             }
 
             current =
-                next
-                    .GroupBy(
-                        x => NormalizeId(x.Id),
-                        StringComparer.OrdinalIgnoreCase)
-                    .Select(
-                        x => x.First())
-                    .ToList();
+                DistinctResources(next);
 
             if (current.Count == 0)
             {
@@ -284,17 +408,37 @@ public sealed class AzureResourceGraph
 
         return current
             .Where(
-                x =>
+                resource =>
                     string.Equals(
-                        x.Type,
+                        resource.Type,
                         targetType,
                         StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private static IReadOnlyList<AzureResource>
+        DistinctResources(
+            IEnumerable<AzureResource> resources)
+    {
+        return resources
+            .Where(
+                resource =>
+                    resource != null &&
+                    !string.IsNullOrWhiteSpace(resource.Id))
+            .GroupBy(
+                resource =>
+                    NormalizeId(resource.Id),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(
+                group => group.First())
             .ToList();
     }
 
     private static string NormalizeId(
         string id)
     {
-        return id.TrimEnd('/');
+        return id
+            .Trim()
+            .TrimEnd('/');
     }
 }

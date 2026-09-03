@@ -1,3 +1,5 @@
+using CloudLens.Core.Azure;
+
 namespace CloudLens.Core;
 
 public enum Severity
@@ -49,32 +51,21 @@ public sealed record MetricProfile(
 public sealed class ScanStats
 {
     public int Resources { get; init; } = 0;
-
     public int Vms { get; init; } = 0;
-
     public int Disks { get; init; } = 0;
-
     public int Nsgs { get; init; } = 0;
-
     public int PublicIps { get; init; } = 0;
-
     public int StorageAccounts { get; init; } = 0;
-
     public int Advisor { get; init; } = 0;
-
     public double MonthlyCostEur { get; init; } = 0;
 }
 
 public sealed class EnrichmentStats
 {
     public int TotalResources { get; init; } = 0;
-
     public int Successful { get; init; } = 0;
-
     public int Failed { get; init; } = 0;
-
     public int NotProcessed { get; init; } = 0;
-
     public double SuccessRate { get; init; } = 0;
 
     public Dictionary<string, int> ApiVersions { get; init; } =
@@ -101,6 +92,8 @@ public sealed class ScanResult
     public List<MetricProfile> MetricProfiles { get; set; } = [];
 
     public EnrichmentStats Enrichment { get; set; } = new();
+
+    public List<AzureResource> Resources { get; init; } = [];
 }
 
 public sealed class AzureMetricAggregate

@@ -16,6 +16,10 @@ public partial class MainWindow : Window
 
     private ScanResult? _result;
 
+    private List<ResourceExplorerItem> _resourceExplorerItems = [];
+
+    private ResourceExplorerDetail? _selectedResourceDetail;
+
     private string? _tenantId;
 
     private string? _accessToken;
@@ -31,6 +35,9 @@ public partial class MainWindow : Window
             "Accedere prima con Microsoft");
 
         Subscription.SelectedIndex = 0;
+
+        ResourceDetailPanel.Visibility =
+            Visibility.Collapsed;
     }
 
 
@@ -293,6 +300,83 @@ public partial class MainWindow : Window
 
 
     // =========================================================
+    // RESOURCE EXPLORER
+    // =========================================================
+
+    private void ResourcesGrid_SelectionChanged(
+        object sender,
+        System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_result == null)
+        {
+            ClearResourceDetail();
+            return;
+        }
+
+        if (ResourcesGrid.SelectedItem
+            is not ResourceExplorerItem item)
+        {
+            ClearResourceDetail();
+            return;
+        }
+
+        var graph =
+            new AzureResourceGraph(
+                _result.Resources);
+
+        _selectedResourceDetail =
+            new ResourceExplorerDetail(
+                item.Resource,
+                graph);
+
+        ResourceDetailPanel.Visibility =
+            Visibility.Visible;
+
+        DetailName.Text =
+            _selectedResourceDetail.Name;
+
+        DetailType.Text =
+            _selectedResourceDetail.Type;
+
+        DetailResourceGroup.Text =
+            _selectedResourceDetail.ResourceGroup;
+
+        DetailLocation.Text =
+            _selectedResourceDetail.Location;
+
+        DetailSubscriptionId.Text =
+            _selectedResourceDetail.SubscriptionId;
+
+        DetailId.Text =
+            _selectedResourceDetail.Id;
+
+        DetailEnrichmentStatus.Text =
+            _selectedResourceDetail.EnrichmentStatus;
+
+        DetailEnrichmentApiVersion.Text =
+            _selectedResourceDetail.EnrichmentApiVersion;
+
+        DetailTags.Text =
+            _selectedResourceDetail.TagsSummary;
+
+        RelationshipsGrid.ItemsSource =
+            _selectedResourceDetail.Relationships;
+    }
+
+
+    private void ClearResourceDetail()
+    {
+        _selectedResourceDetail = null;
+
+        ResourceDetailPanel.Visibility =
+            Visibility.Collapsed;
+
+        RelationshipsGrid.ItemsSource =
+            null;
+    }
+
+
+    // =========================================================
     // UI STATE
     // =========================================================
 
@@ -352,5 +436,97 @@ public partial class MainWindow : Window
 
         MetricsGrid.ItemsSource =
             result.MetricProfiles;
+
+
+        // =====================================================
+        // RESOURCE EXPLORER
+        // =====================================================
+
+        _resourceExplorerItems =
+            result.Resources
+                .Where(
+                    resource =>
+                        resource != null)
+                .Select(
+                    resource =>
+                        new ResourceExplorerItem(
+                            resource))
+                .OrderBy(
+                    item => item.Type)
+                .ThenBy(
+                    item => item.Name)
+                .ToList();
+
+        ResourcesGrid.ItemsSource =
+            _resourceExplorerItems;
+
+        ResourcesGrid.SelectedItem =
+            null;
+
+        ClearResourceDetail();
+
+
+        // =====================================================
+        // ENRICHMENT DIAGNOSTICS
+        // =====================================================
+
+        var enrichment =
+            result.Enrichment;
+
+        var message =
+            $"Risorse totali: {enrichment.TotalResources}\n" +
+            $"Enrichment riusciti: {enrichment.Successful}\n" +
+            $"Enrichment falliti: {enrichment.Failed}\n" +
+            $"Non processate: {enrichment.NotProcessed}\n" +
+            $"Success rate: {enrichment.SuccessRate:F1}%\n";
+
+
+        // -----------------------------------------------------
+        // API VERSIONS
+        // -----------------------------------------------------
+
+        if (enrichment.ApiVersions.Count > 0)
+        {
+            message +=
+                "\nAPI versions:\n";
+
+            foreach (var version in
+                     enrichment.ApiVersions
+                         .OrderByDescending(
+                             item => item.Value))
+            {
+                message +=
+                    $"  {version.Key}: " +
+                    $"{version.Value}\n";
+            }
+        }
+
+
+        // -----------------------------------------------------
+        // ERRORS
+        // -----------------------------------------------------
+
+        if (enrichment.Errors.Count > 0)
+        {
+            message +=
+                "\nErrori enrichment:\n";
+
+            foreach (var error in
+                     enrichment.Errors)
+            {
+                message +=
+                    $"\n{error.Key}\n" +
+                    $"{error.Value}\n";
+            }
+        }
+
+
+        MessageBox.Show(
+            message,
+            "CloudLens — Enrichment diagnostics",
+            MessageBoxButton.OK,
+            enrichment.Failed > 0
+                ? MessageBoxImage.Warning
+                : MessageBoxImage.Information);
     }
 }

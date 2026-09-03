@@ -7,18 +7,17 @@ public sealed class AzureRelationshipBuilder
     public void Build(
         IReadOnlyList<AzureResource> resources)
     {
-        if (resources.Count == 0)
-        {
-            return;
-        }
+        if (resources == null)
+            throw new ArgumentNullException(nameof(resources));
 
         var resourcesById =
             resources
-                .Where(
-                    x => !string.IsNullOrWhiteSpace(x.Id))
+                .GroupBy(
+                    resource => NormalizeId(resource.Id),
+                    StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    x => NormalizeId(x.Id),
-                    x => x,
+                    group => group.Key,
+                    group => group.First(),
                     StringComparer.OrdinalIgnoreCase);
 
         foreach (var resource in resources)
@@ -48,7 +47,7 @@ public sealed class AzureRelationshipBuilder
     }
 
     // =========================================================
-    // VIRTUAL MACHINE
+    // VIRTUAL MACHINES
     // =========================================================
 
     private static void BuildVirtualMachineRelationships(
@@ -57,104 +56,111 @@ public sealed class AzureRelationshipBuilder
     {
         foreach (var vm in resources.Where(IsVirtualMachine))
         {
-            var properties =
-                GetEffectiveProperties(vm);
+            var properties = GetEffectiveProperties(vm);
 
-            if (!properties.HasValue)
-            {
-                continue;
-            }
-
-            // -------------------------------------------------
             // VM -> NIC
-            // -------------------------------------------------
-
-            if (TryGetProperty(
-                    properties.Value,
-                    "networkProfile",
-                    out var networkProfile) &&
-                TryGetProperty(
+            if (TryGetObject(
+                    properties,
+                    out var networkProfile,
+                    "networkProfile") &&
+                TryGetArray(
                     networkProfile,
                     "networkInterfaces",
-                    out var networkInterfaces) &&
-                networkInterfaces.ValueKind ==
-                    JsonValueKind.Array)
+                    out var networkInterfaces))
             {
                 foreach (var nicReference in
                          networkInterfaces.EnumerateArray())
                 {
-                    var nicId =
-                        GetString(
+                    if (nicReference.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    if (!TryGetString(
                             nicReference,
-                            "id");
+                            "id",
+                            out var nicId))
+                    {
+                        continue;
+                    }
 
                     AddRelationship(
                         vm,
                         nicId,
-                        "NetworkInterface");
+                        "NetworkInterface",
+                        resourcesById);
                 }
             }
 
-            // -------------------------------------------------
-            // VM -> OS DISK
-            // -------------------------------------------------
-
-            if (TryGetProperty(
-                    properties.Value,
-                    "storageProfile",
-                    out var storageProfile) &&
-                TryGetProperty(
-                    storageProfile,
-                    "osDisk",
-                    out var osDisk))
+            // VM -> OS Disk
+            if (TryGetObject(
+                    properties,
+                    out var storageProfile,
+                    "storageProfile"))
             {
-                var diskId =
-                    GetString(
-                        osDisk,
-                        "managedDisk",
-                        "id");
-
-                AddRelationship(
-                    vm,
-                    diskId,
-                    "OsDisk");
-            }
-
-            // -------------------------------------------------
-            // VM -> DATA DISKS
-            // -------------------------------------------------
-
-            if (TryGetProperty(
-                    properties.Value,
-                    "storageProfile",
-                    out storageProfile) &&
-                TryGetProperty(
-                    storageProfile,
-                    "dataDisks",
-                    out var dataDisks) &&
-                dataDisks.ValueKind ==
-                    JsonValueKind.Array)
-            {
-                foreach (var dataDisk in
-                         dataDisks.EnumerateArray())
+                if (TryGetObject(
+                        storageProfile,
+                        out var osDisk,
+                        "osDisk"))
                 {
-                    var diskId =
-                        GetString(
-                            dataDisk,
-                            "managedDisk",
-                            "id");
+                    if (TryGetObject(
+                            osDisk,
+                            out var managedDisk,
+                            "managedDisk"))
+                    {
+                        if (TryGetString(
+                                managedDisk,
+                                "id",
+                                out var diskId))
+                        {
+                            AddRelationship(
+                                vm,
+                                diskId,
+                                "OsDisk",
+                                resourcesById);
+                        }
+                    }
+                }
 
-                    AddRelationship(
-                        vm,
-                        diskId,
-                        "DataDisk");
+                // VM -> Data Disks
+                if (TryGetArray(
+                        storageProfile,
+                        "dataDisks",
+                        out var dataDisks))
+                {
+                    foreach (var dataDisk in
+                             dataDisks.EnumerateArray())
+                    {
+                        if (dataDisk.ValueKind != JsonValueKind.Object)
+                            continue;
+
+                        if (!TryGetObject(
+                                dataDisk,
+                                out var managedDisk,
+                                "managedDisk"))
+                        {
+                            continue;
+                        }
+
+                        if (!TryGetString(
+                                managedDisk,
+                                "id",
+                                out var diskId))
+                        {
+                            continue;
+                        }
+
+                        AddRelationship(
+                            vm,
+                            diskId,
+                            "DataDisk",
+                            resourcesById);
+                    }
                 }
             }
         }
     }
 
     // =========================================================
-    // NETWORK INTERFACE
+    // NETWORK INTERFACES
     // =========================================================
 
     private static void BuildNetworkInterfaceRelationships(
@@ -163,83 +169,86 @@ public sealed class AzureRelationshipBuilder
     {
         foreach (var nic in resources.Where(IsNetworkInterface))
         {
-            var properties =
-                GetEffectiveProperties(nic);
+            var properties = GetEffectiveProperties(nic);
 
-            if (!properties.HasValue)
-            {
-                continue;
-            }
-
-            // -------------------------------------------------
             // NIC -> NSG
-            // -------------------------------------------------
+            if (TryGetObject(
+                    properties,
+                    out var networkSecurityGroup,
+                    "networkSecurityGroup"))
+            {
+                if (TryGetString(
+                        networkSecurityGroup,
+                        "id",
+                        out var nsgId))
+                {
+                    AddRelationship(
+                        nic,
+                        nsgId,
+                        "NetworkSecurityGroup",
+                        resourcesById);
+                }
+            }
 
-            var nsgId =
-                GetString(
-                    properties.Value,
-                    "networkSecurityGroup",
-                    "id");
-
-            AddRelationship(
-                nic,
-                nsgId,
-                "NetworkSecurityGroup");
-
-            // -------------------------------------------------
-            // IP CONFIGURATIONS
-            // -------------------------------------------------
-
-            if (!TryGetProperty(
-                    properties.Value,
+            if (!TryGetArray(
+                    properties,
                     "ipConfigurations",
-                    out var ipConfigurations) ||
-                ipConfigurations.ValueKind !=
-                    JsonValueKind.Array)
+                    out var ipConfigurations))
             {
                 continue;
             }
 
-            foreach (var configuration in
+            foreach (var ipConfiguration in
                      ipConfigurations.EnumerateArray())
             {
-                if (!TryGetProperty(
-                        configuration,
-                        "properties",
-                        out var ipProperties))
-                {
+                if (ipConfiguration.ValueKind != JsonValueKind.Object)
                     continue;
-                }
 
                 // NIC -> Subnet
-                var subnetId =
-                    GetString(
-                        ipProperties,
-                        "subnet",
-                        "id");
-
-                AddRelationship(
-                    nic,
-                    subnetId,
-                    "Subnet");
+                if (TryGetObject(
+                        ipConfiguration,
+                        out var subnet,
+                        "properties",
+                        "subnet"))
+                {
+                    if (TryGetString(
+                            subnet,
+                            "id",
+                            out var subnetId))
+                    {
+                        AddRelationship(
+                            nic,
+                            subnetId,
+                            "Subnet",
+                            resourcesById);
+                    }
+                }
 
                 // NIC -> Public IP
-                var publicIpId =
-                    GetString(
-                        ipProperties,
-                        "publicIPAddress",
-                        "id");
-
-                AddRelationship(
-                    nic,
-                    publicIpId,
-                    "PublicIPAddress");
+                if (TryGetObject(
+                        ipConfiguration,
+                        out var publicIp,
+                        "properties",
+                        "publicIPAddress"))
+                {
+                    if (TryGetString(
+                            publicIp,
+                            "id",
+                            out var publicIpId))
+                    {
+                        AddRelationship(
+                            nic,
+                            publicIpId,
+                            "PublicIPAddress",
+                            resourcesById);
+                    }
+                }
             }
         }
     }
 
     // =========================================================
-    // SUBNET
+    // SUBNETS
     // =========================================================
 
     private static void BuildSubnetRelationships(
@@ -248,129 +257,157 @@ public sealed class AzureRelationshipBuilder
     {
         foreach (var subnet in resources.Where(IsSubnet))
         {
-            var properties =
-                GetEffectiveProperties(subnet);
+            var properties = GetEffectiveProperties(subnet);
 
-            if (!properties.HasValue)
+            // -------------------------------------------------
+            // Subnet -> VNet
+            // -------------------------------------------------
+
+            var virtualNetworkId =
+                GetVirtualNetworkIdFromSubnetId(subnet.Id);
+
+            if (!string.IsNullOrWhiteSpace(virtualNetworkId))
             {
-                continue;
+                AddRelationship(
+                    subnet,
+                    virtualNetworkId,
+                    "VirtualNetwork",
+                    resourcesById);
             }
 
             // -------------------------------------------------
-            // SUBNET -> NSG
+            // Subnet -> NSG
             // -------------------------------------------------
 
-            var nsgId =
-                GetString(
-                    properties.Value,
-                    "networkSecurityGroup",
-                    "id");
-
-            AddRelationship(
-                subnet,
-                nsgId,
-                "NetworkSecurityGroup");
-
-            // -------------------------------------------------
-            // SUBNET -> ROUTE TABLE
-            // -------------------------------------------------
-
-            var routeTableId =
-                GetString(
-                    properties.Value,
-                    "routeTable",
-                    "id");
-
-            AddRelationship(
-                subnet,
-                routeTableId,
-                "RouteTable");
+            if (TryGetObject(
+                    properties,
+                    out var networkSecurityGroup,
+                    "networkSecurityGroup"))
+            {
+                if (TryGetString(
+                        networkSecurityGroup,
+                        "id",
+                        out var nsgId))
+                {
+                    AddRelationship(
+                        subnet,
+                        nsgId,
+                        "NetworkSecurityGroup",
+                        resourcesById);
+                }
+            }
 
             // -------------------------------------------------
-            // SUBNET -> NAT GATEWAY
+            // Subnet -> Route Table
             // -------------------------------------------------
 
-            var natGatewayId =
-                GetString(
-                    properties.Value,
-                    "natGateway",
-                    "id");
+            if (TryGetObject(
+                    properties,
+                    out var routeTable,
+                    "routeTable"))
+            {
+                if (TryGetString(
+                        routeTable,
+                        "id",
+                        out var routeTableId))
+                {
+                    AddRelationship(
+                        subnet,
+                        routeTableId,
+                        "RouteTable",
+                        resourcesById);
+                }
+            }
 
-            AddRelationship(
-                subnet,
-                natGatewayId,
-                "NatGateway");
+            // -------------------------------------------------
+            // Subnet -> NAT Gateway
+            // -------------------------------------------------
+
+            if (TryGetObject(
+                    properties,
+                    out var natGateway,
+                    "natGateway"))
+            {
+                if (TryGetString(
+                        natGateway,
+                        "id",
+                        out var natGatewayId))
+                {
+                    AddRelationship(
+                        subnet,
+                        natGatewayId,
+                        "NatGateway",
+                        resourcesById);
+                }
+            }
         }
     }
 
     // =========================================================
-    // PRIVATE ENDPOINT
+    // PRIVATE ENDPOINTS
     // =========================================================
 
     private static void BuildPrivateEndpointRelationships(
         IReadOnlyList<AzureResource> resources,
         IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
-        foreach (var endpoint in
+        foreach (var privateEndpoint in
                  resources.Where(IsPrivateEndpoint))
         {
             var properties =
-                GetEffectiveProperties(endpoint);
+                GetEffectiveProperties(privateEndpoint);
 
-            if (!properties.HasValue)
+            // Private Endpoint -> Subnet
+            if (TryGetObject(
+                    properties,
+                    out var subnet,
+                    "subnet"))
             {
-                continue;
-            }
-
-            // -------------------------------------------------
-            // PRIVATE ENDPOINT -> SUBNET
-            // -------------------------------------------------
-
-            var subnetId =
-                GetString(
-                    properties.Value,
-                    "subnet",
-                    "id");
-
-            AddRelationship(
-                endpoint,
-                subnetId,
-                "Subnet");
-
-            // -------------------------------------------------
-            // PRIVATE ENDPOINT -> TARGET
-            // -------------------------------------------------
-
-            if (!TryGetProperty(
-                    properties.Value,
-                    "privateLinkServiceConnections",
-                    out var connections) ||
-                connections.ValueKind !=
-                    JsonValueKind.Array)
-            {
-                continue;
-            }
-
-            foreach (var connection in
-                     connections.EnumerateArray())
-            {
-                if (!TryGetProperty(
-                        connection,
-                        "properties",
-                        out var connectionProperties))
+                if (TryGetString(
+                        subnet,
+                        "id",
+                        out var subnetId))
                 {
-                    continue;
+                    AddRelationship(
+                        privateEndpoint,
+                        subnetId,
+                        "Subnet",
+                        resourcesById);
                 }
+            }
 
-                var resourceId =
-                    GetString(
-                        connectionProperties,
-                        "privateLinkServiceId");
+            // Private Endpoint -> Private Link Target
+            if (TryGetArray(
+                    properties,
+                    "privateLinkServiceConnections",
+                    out var connections))
+            {
+                foreach (var connection in
+                         connections.EnumerateArray())
+                {
+                    if (connection.ValueKind != JsonValueKind.Object)
+                        continue;
 
-                AddRelationship(
-                    endpoint,
-                    resourceId,
-                    "PrivateLinkTarget");
+                    if (!TryGetObject(
+                            connection,
+                            out var privateLinkServiceConnection,
+                            "properties"))
+                    {
+                        continue;
+                    }
+
+                    if (TryGetString(
+                            privateLinkServiceConnection,
+                            "privateLinkServiceId",
+                            out var targetId))
+                    {
+                        AddRelationship(
+                            privateEndpoint,
+                            targetId,
+                            "PrivateLinkTarget",
+                            resourcesById);
+                    }
+                }
             }
         }
     }
@@ -383,96 +420,138 @@ public sealed class AzureRelationshipBuilder
         IReadOnlyList<AzureResource> resources,
         IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
-        // Attualmente le relazioni dei Managed Disk
-        // vengono costruite dal lato VM:
-        //
-        // VM -> OsDisk
-        // VM -> DataDisk
-        //
-        // Questo metodo viene mantenuto come punto di estensione
-        // per eventuali relazioni inverse o ulteriori proprietà
-        // dei Managed Disk.
+        // VM -> Disk relationships are sufficient for the current
+        // graph model. Disk -> VM can be derived through
+        // AzureResourceGraph.GetDependents().
     }
 
     // =========================================================
-    // RELATIONSHIP CREATION
+    // RELATIONSHIP ADDITION
     // =========================================================
 
     private static void AddRelationship(
         AzureResource source,
         string? targetId,
-        string relationshipType)
+        string relationshipType,
+        IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
         if (string.IsNullOrWhiteSpace(targetId))
         {
             return;
         }
 
+        var normalizedTargetId =
+            NormalizeId(targetId);
+
+        if (!resourcesById.ContainsKey(normalizedTargetId))
+        {
+            return;
+        }
+
         var relationship =
             new AzureResourceRelationship(
-                SourceResourceId:
-                    NormalizeId(source.Id),
+                RelationshipType: relationshipType,
+                SourceResourceId: NormalizeId(source.Id),
+                TargetResourceId: normalizedTargetId);
 
-                TargetResourceId:
-                    NormalizeId(targetId),
-
-                RelationshipType:
-                    relationshipType);
-
-        if (!source.Relationships.Contains(
-                relationship))
+        if (!source.Relationships.Contains(relationship))
         {
-            source.Relationships.Add(
-                relationship);
+            source.Relationships.Add(relationship);
         }
     }
 
     // =========================================================
-    // EFFECTIVE PROPERTIES
+    // PROPERTY HELPERS
     // =========================================================
 
-    private static JsonElement? GetEffectiveProperties(
+    private static JsonElement GetEffectiveProperties(
         AzureResource resource)
     {
-        // -----------------------------------------------------
-        // Preferisce i dati ottenuti direttamente da ARM
-        // tramite enrichment.
-        // -----------------------------------------------------
-
-        if (resource.Enrichment?.Success == true &&
-            resource.Enrichment.ArmResource.HasValue)
+        if (resource.Properties.HasValue &&
+            resource.Properties.Value.ValueKind ==
+                JsonValueKind.Object)
         {
-            var arm =
-                resource.Enrichment.ArmResource.Value;
+            return resource.Properties.Value;
+        }
 
-            if (TryGetProperty(
-                    arm,
-                    "properties",
-                    out var properties))
+        return default;
+    }
+
+    private static bool TryGetObject(
+        JsonElement element,
+        out JsonElement value,
+        params string[] path)
+    {
+        value = default;
+
+        var current = element;
+
+        foreach (var propertyName in path)
+        {
+            if (current.ValueKind != JsonValueKind.Object ||
+                !current.TryGetProperty(
+                    propertyName,
+                    out current))
             {
-                return properties;
+                return false;
             }
         }
 
-        // -----------------------------------------------------
-        // Fallback: dati della discovery originale.
-        // -----------------------------------------------------
+        if (current.ValueKind != JsonValueKind.Object)
+            return false;
 
-        if (resource.Properties.HasValue)
+        value = current;
+        return true;
+    }
+
+    private static bool TryGetArray(
+        JsonElement element,
+        string propertyName,
+        out JsonElement value)
+    {
+        value = default;
+
+        if (element.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (!element.TryGetProperty(
+                propertyName,
+                out var property))
         {
-            var properties =
-                resource.Properties.Value;
-
-            if (properties.ValueKind !=
-                JsonValueKind.Undefined &&
-                properties.ValueKind !=
-                JsonValueKind.Null)
-            {
-                return properties;
-            }
+            return false;
         }
 
-        return null;
+        if (property.ValueKind != JsonValueKind.Array)
+            return false;
+
+        value = property;
+
+        return true;
+    }
+
+    private static bool TryGetString(
+        JsonElement element,
+        string propertyName,
+        out string? value)
+    {
+        value = null;
+
+        if (element.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (!element.TryGetProperty(
+                propertyName,
+                out var property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind != JsonValueKind.String)
+            return false;
+
+        value = property.GetString();
+
+        return !string.IsNullOrWhiteSpace(value);
     }
 
     // =========================================================
@@ -482,7 +561,7 @@ public sealed class AzureRelationshipBuilder
     private static bool IsVirtualMachine(
         AzureResource resource)
     {
-        return TypeEquals(
+        return IsType(
             resource,
             "Microsoft.Compute/virtualMachines");
     }
@@ -490,7 +569,7 @@ public sealed class AzureRelationshipBuilder
     private static bool IsNetworkInterface(
         AzureResource resource)
     {
-        return TypeEquals(
+        return IsType(
             resource,
             "Microsoft.Network/networkInterfaces");
     }
@@ -498,7 +577,7 @@ public sealed class AzureRelationshipBuilder
     private static bool IsSubnet(
         AzureResource resource)
     {
-        return TypeEquals(
+        return IsType(
             resource,
             "Microsoft.Network/virtualNetworks/subnets");
     }
@@ -506,63 +585,58 @@ public sealed class AzureRelationshipBuilder
     private static bool IsPrivateEndpoint(
         AzureResource resource)
     {
-        return TypeEquals(
+        return IsType(
             resource,
             "Microsoft.Network/privateEndpoints");
     }
 
-    private static bool TypeEquals(
+    private static bool IsType(
         AzureResource resource,
-        string type)
+        string expectedType)
     {
         return string.Equals(
             resource.Type,
-            type,
+            expectedType,
             StringComparison.OrdinalIgnoreCase);
     }
 
     // =========================================================
-    // JSON HELPERS
+    // SUBNET PARENT VNET
     // =========================================================
 
-    private static bool TryGetProperty(
-        JsonElement element,
-        string property,
-        out JsonElement value)
+    private static string? GetVirtualNetworkIdFromSubnetId(
+        string subnetId)
     {
-        return element.TryGetProperty(
-            property,
-            out value);
-    }
-
-    private static string? GetString(
-        JsonElement element,
-        string property)
-    {
-        return element.TryGetProperty(
-                property,
-                out var value) &&
-            value.ValueKind ==
-                JsonValueKind.String
-            ? value.GetString()
-            : null;
-    }
-
-    private static string? GetString(
-        JsonElement element,
-        string parentProperty,
-        string childProperty)
-    {
-        if (!element.TryGetProperty(
-                parentProperty,
-                out var parent))
-        {
+        if (string.IsNullOrWhiteSpace(subnetId))
             return null;
-        }
 
-        return GetString(
-            parent,
-            childProperty);
+        var normalized =
+            NormalizeId(subnetId);
+
+        const string marker =
+            "/virtualnetworks/";
+
+        var virtualNetworkIndex =
+            normalized.IndexOf(
+                marker,
+                StringComparison.OrdinalIgnoreCase);
+
+        if (virtualNetworkIndex < 0)
+            return null;
+
+        const string subnetMarker =
+            "/subnets/";
+
+        var subnetIndex =
+            normalized.IndexOf(
+                subnetMarker,
+                virtualNetworkIndex + marker.Length,
+                StringComparison.OrdinalIgnoreCase);
+
+        if (subnetIndex < 0)
+            return null;
+
+        return normalized[..subnetIndex];
     }
 
     // =========================================================

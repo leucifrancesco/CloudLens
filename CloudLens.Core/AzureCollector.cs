@@ -142,10 +142,6 @@ public sealed class AzureCollector
 
         var stopwatch = Stopwatch.StartNew();
 
-        // =====================================================
-        // 1. DISCOVERY
-        // =====================================================
-
         var client = new AzureResourceClient(
             _http,
             token);
@@ -154,10 +150,6 @@ public sealed class AzureCollector
             await client.GetAzureResourcesAsync(
                 subscription.Id,
                 cancellationToken);
-
-        // =====================================================
-        // 2. ENRICHMENT
-        // =====================================================
 
         var enricher = new AzureResourceEnricher(
             _http,
@@ -170,10 +162,6 @@ public sealed class AzureCollector
         var enrichmentStats =
             BuildEnrichmentStats(resources);
 
-        // =====================================================
-        // 3. RELATIONSHIPS
-        // =====================================================
-
         var relationshipBuilder =
             new AzureRelationshipBuilder();
 
@@ -181,10 +169,6 @@ public sealed class AzureCollector
 
         var resourceGraph =
             new AzureResourceGraph(resources);
-
-        // =====================================================
-        // 4. METRICS
-        // =====================================================
 
         var monitorClient =
             new AzureMonitorClient(
@@ -201,14 +185,12 @@ public sealed class AzureCollector
                 rawResources,
                 cancellationToken);
 
-        // =====================================================
-        // 5. ANALYSIS
-        // =====================================================
-
         var result =
             _assessmentEngine.Analyze(
                 resources,
                 subscription);
+
+        result.Resources.AddRange(resources);
 
         result.MetricProfiles =
             metricProfiles;
@@ -227,10 +209,6 @@ public sealed class AzureCollector
 
         return result;
     }
-
-    // =========================================================
-    // ENRICHMENT STATS
-    // =========================================================
 
     private static EnrichmentStats
         BuildEnrichmentStats(
@@ -321,10 +299,6 @@ public sealed class AzureCollector
                 errors
         };
     }
-
-    // =========================================================
-    // DIAGNOSTICS
-    // =========================================================
 
     private static void PrintScanDiagnostics(
         IReadOnlyList<AzureResource> resources,
