@@ -99,9 +99,7 @@ public sealed class AzureResourceClient
                     "id");
 
             if (string.IsNullOrWhiteSpace(id))
-            {
                 continue;
-            }
 
             var name =
                 GetString(
@@ -151,17 +149,6 @@ public sealed class AzureResourceClient
                 nameof(subscriptionId));
         }
 
-        // -----------------------------------------------------
-        // Azure Resource Graph richiede il GUID puro.
-        //
-        // Azure ARM invece normalmente restituisce:
-        //
-        // /subscriptions/{GUID}
-        //
-        // Normalizziamo quindi il valore prima di inviarlo
-        // a Resource Graph.
-        // -----------------------------------------------------
-
         var normalizedSubscriptionId =
             NormalizeSubscriptionId(
                 subscriptionId);
@@ -177,7 +164,8 @@ public sealed class AzureResourceClient
         }
 
         var resources =
-            new List<JsonElement>();
+            new Dictionary<string, JsonElement>(
+                StringComparer.OrdinalIgnoreCase);
 
         var skipToken =
             string.Empty;
@@ -186,34 +174,10 @@ public sealed class AzureResourceClient
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var query =
-                BuildResourceQuery(
-                    normalizedSubscriptionId);
-
             var requestBody =
-                new Dictionary<string, object?>
-                {
-                    ["subscriptions"] =
-                        new[]
-                        {
-                            normalizedSubscriptionId
-                        },
-
-                    ["query"] =
-                        query,
-
-                    ["options"] =
-                        new
-                        {
-                            resultFormat = "objectArray",
-
-                            skipToken =
-                                string.IsNullOrWhiteSpace(
-                                    skipToken)
-                                    ? null
-                                    : skipToken
-                        }
-                };
+                BuildResourceGraphRequest(
+                    normalizedSubscriptionId,
+                    skipToken);
 
             var jsonBody =
                 JsonSerializer.Serialize(
@@ -260,31 +224,71 @@ public sealed class AzureResourceClient
             if (document.RootElement.TryGetProperty(
                     "data",
                     out var data) &&
-                data.ValueKind ==
-                    JsonValueKind.Array)
+                data.ValueKind == JsonValueKind.Array)
             {
                 foreach (var resource in
                          data.EnumerateArray())
                 {
-                    resources.Add(
-                        resource.Clone());
+                    if (!TryGetResourceId(
+                            resource,
+                            out var resourceId))
+                    {
+                        continue;
+                    }
+
+                    resources[resourceId] =
+                        resource.Clone();
                 }
             }
 
             skipToken =
                 document.RootElement.TryGetProperty(
                     "$skipToken",
-                    out var tokenElement)
-                &&
+                    out var tokenElement) &&
                 tokenElement.ValueKind ==
                     JsonValueKind.String
-                    ? tokenElement.GetString() ?? ""
-                    : "";
+                    ? tokenElement.GetString() ?? string.Empty
+                    : string.Empty;
 
         }
         while (!string.IsNullOrWhiteSpace(skipToken));
 
-        return resources;
+        return resources.Values.ToList();
+    }
+
+    // =========================================================
+    // RESOURCE GRAPH REQUEST
+    // =========================================================
+
+    private static object
+        BuildResourceGraphRequest(
+            string subscriptionId,
+            string skipToken)
+    {
+        return new
+        {
+            subscriptions =
+                new[]
+                {
+                    subscriptionId
+                },
+
+            query =
+                BuildResourceQuery(),
+
+            options =
+                new
+                {
+                    resultFormat =
+                        "objectArray",
+
+                    skipToken =
+                        string.IsNullOrWhiteSpace(
+                            skipToken)
+                            ? null
+                            : skipToken
+                }
+        };
     }
 
     // =========================================================
@@ -323,8 +327,7 @@ public sealed class AzureResourceClient
     // RESOURCE QUERY
     // =========================================================
 
-    private static string BuildResourceQuery(
-        string subscriptionId)
+    private static string BuildResourceQuery()
     {
         return """
             Resources
@@ -332,14 +335,48 @@ public sealed class AzureResourceClient
                 id,
                 name,
                 type,
+                kind,
                 resourceGroup,
                 location,
                 subscriptionId,
+                tenantId,
                 tags,
                 sku,
+                plan,
+                managedBy,
+                identity,
+                zones,
+                extendedLocation,
                 properties
             | order by type asc, name asc
             """;
+    }
+
+    // =========================================================
+    // RESOURCE ID
+    // =========================================================
+
+    private static bool TryGetResourceId(
+        JsonElement resource,
+        out string resourceId)
+    {
+        resourceId =
+            string.Empty;
+
+        if (!resource.TryGetProperty(
+                "id",
+                out var idElement) ||
+            idElement.ValueKind !=
+                JsonValueKind.String)
+        {
+            return false;
+        }
+
+        resourceId =
+            idElement.GetString() ?? string.Empty;
+
+        return !string.IsNullOrWhiteSpace(
+            resourceId);
     }
 
     // =========================================================

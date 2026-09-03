@@ -4,142 +4,71 @@ namespace CloudLens.Core.Analysis;
 
 public sealed class OperationsAnalyzer : IAnalyzer
 {
-public IEnumerable<Finding> Analyze(
-IReadOnlyList<AzureResource> resources,
-AzureSubscription subscription)
-{
-var findings =
-new List<Finding>();
-
-    AnalyzeMissingTags(
-        resources,
-        subscription,
-        findings);
-
-    AnalyzeMissingLocation(
-        resources,
-        subscription,
-        findings);
-
-    return findings;
-}
-
-// =========================================================
-// TAGGING
-// =========================================================
-
-private static void AnalyzeMissingTags(
-    IReadOnlyList<AzureResource> resources,
-    AzureSubscription subscription,
-    List<Finding> findings)
-{
-    var untagged =
-        resources
-            .Where(
-                resource =>
-                    resource.Tags.Count == 0)
-            .ToList();
-
-    if (untagged.Count == 0)
+    public IEnumerable<Finding> Analyze(
+        IReadOnlyList<AzureResource> resources,
+        AzureSubscription subscription)
     {
-        return;
+        var findings = new List<Finding>();
+
+        AnalyzeMissingTags(
+            resources,
+            subscription,
+            findings);
+
+        return findings;
     }
 
-    findings.Add(
-        new Finding(
-            Id:
-                Guid.NewGuid().ToString(),
+    // ============================================================
+    // TAG GOVERNANCE
+    // ============================================================
 
-            Category:
-                Category.Operations,
-
-            Severity:
-                Severity.Medium,
-
-            RuleId:
-                "GOV-NO-TAGS",
-
-            Title:
-                $"{untagged.Count} risorse prive di tag",
-
-            Description:
-                $"{untagged.Count} risorse su {resources.Count} " +
-                "non hanno tag di governance.",
-
-            Impact:
-                "Riduce la capacità di attribuire costi, " +
-                "ownership e ambiente.",
-
-            Recommendation:
-                "Definire uno standard di tagging e applicarlo " +
-                "tramite Azure Policy.",
-
-            ResourceName:
-                subscription.Name,
-
-            ResourceType:
-                "Microsoft.Resources/subscriptions",
-
-            ResourceId:
-                subscription.Id));
-}
-
-// =========================================================
-// LOCATION
-// =========================================================
-
-private static void AnalyzeMissingLocation(
-    IReadOnlyList<AzureResource> resources,
-    AzureSubscription subscription,
-    List<Finding> findings)
-{
-    var invalid =
-        resources.Count(
-            resource =>
-                string.IsNullOrWhiteSpace(
-                    resource.Location));
-
-    if (invalid == 0)
+    private static void AnalyzeMissingTags(
+        IReadOnlyList<AzureResource> resources,
+        AzureSubscription subscription,
+        List<Finding> findings)
     {
-        return;
+        var untaggedResources =
+            resources
+                .Where(resource => resource.Tags.Count == 0)
+                .ToList();
+
+        if (untaggedResources.Count == 0)
+            return;
+
+        var percentage =
+            resources.Count == 0
+                ? 0
+                : (double)untaggedResources.Count /
+                  resources.Count *
+                  100;
+
+        var percentageText =
+            percentage.ToString(
+                "0.#",
+                System.Globalization.CultureInfo.InvariantCulture);
+
+        findings.Add(
+            new Finding(
+                Id: Guid.NewGuid().ToString(),
+                Category: Category.Operations,
+                Severity: Severity.Medium,
+                RuleId: "GOV-NO-TAGS",
+                Title:
+                    $"{untaggedResources.Count} risorse prive di tag",
+                Description:
+                    $"{untaggedResources.Count} risorse su " +
+                    $"{resources.Count} ({percentageText}%) " +
+                    "non hanno tag di governance.",
+                Impact:
+                    "L'assenza di tag riduce la capacità di attribuire " +
+                    "costi, ownership, ambiente e finalità delle risorse.",
+                Recommendation:
+                    "Definire uno standard di tagging per proprietà come " +
+                    "Environment, Owner, CostCenter e Application e " +
+                    "applicarlo tramite Azure Policy dove appropriato.",
+                ResourceName: subscription.Name,
+                ResourceType:
+                    "Microsoft.Resources/subscriptions",
+                ResourceId: subscription.Id));
     }
-
-    findings.Add(
-        new Finding(
-            Id:
-                Guid.NewGuid().ToString(),
-
-            Category:
-                Category.Operations,
-
-            Severity:
-                Severity.Low,
-
-            RuleId:
-                "GOV-NO-LOCATION",
-
-            Title:
-                $"{invalid} risorse senza location",
-
-            Description:
-                $"{invalid} risorse non espongono una " +
-                "location valida nella discovery.",
-
-            Impact:
-                "Può complicare governance, inventory e " +
-                "analisi geografica dell'ambiente.",
-
-            Recommendation:
-                "Verificare la risorsa e la modalità con cui " +
-                "viene esposta da Azure Resource Manager.",
-
-            ResourceName:
-                subscription.Name,
-
-            ResourceType:
-                "Microsoft.Resources/subscriptions",
-
-            ResourceId:
-                subscription.Id));
-}
 }

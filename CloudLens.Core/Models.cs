@@ -49,18 +49,45 @@ public sealed record MetricProfile(
 public sealed class ScanStats
 {
     public int Resources { get; init; } = 0;
+
     public int Vms { get; init; } = 0;
+
     public int Disks { get; init; } = 0;
+
     public int Nsgs { get; init; } = 0;
+
     public int PublicIps { get; init; } = 0;
+
     public int StorageAccounts { get; init; } = 0;
+
     public int Advisor { get; init; } = 0;
+
     public double MonthlyCostEur { get; init; } = 0;
+}
+
+public sealed class EnrichmentStats
+{
+    public int TotalResources { get; init; } = 0;
+
+    public int Successful { get; init; } = 0;
+
+    public int Failed { get; init; } = 0;
+
+    public int NotProcessed { get; init; } = 0;
+
+    public double SuccessRate { get; init; } = 0;
+
+    public Dictionary<string, int> ApiVersions { get; init; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Dictionary<string, string> Errors { get; init; } =
+        new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class ScanResult
 {
     public string SubscriptionName { get; init; } = "";
+
     public string SubscriptionId { get; init; } = "";
 
     public int Score { get; init; }
@@ -72,19 +99,25 @@ public sealed class ScanResult
     public Dictionary<Category, int> ScoresByCategory { get; init; } = [];
 
     public List<MetricProfile> MetricProfiles { get; set; } = [];
+
+    public EnrichmentStats Enrichment { get; set; } = new();
 }
 
 public sealed class AzureMetricAggregate
 {
     public string ResourceId { get; init; } = "";
+
     public string ResourceName { get; init; } = "";
+
     public string ResourceType { get; init; } = "";
+
     public string MetricName { get; init; } = "";
 
     public double Average { get; init; }
+
     public double Minimum { get; init; }
+
     public double Maximum { get; init; }
 
     public int Samples { get; init; }
 }
-

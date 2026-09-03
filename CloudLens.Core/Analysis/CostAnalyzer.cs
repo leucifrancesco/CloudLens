@@ -9,63 +9,51 @@ public sealed class CostAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
-        var findings =
-            new List<Finding>();
+        var findings = new List<Finding>();
 
-        AnalyzeUnattachedDisks(
+        AnalyzeUnattachedManagedDisks(
             resources,
             findings);
 
-        AnalyzeOrphanPublicIps(
-            resources,
-            findings);
-
-        AnalyzeUnusedManagedDisks(
+        AnalyzeOrphanPublicIpAddresses(
             resources,
             findings);
 
         return findings;
     }
 
-    // =========================================================
-    // UNATTACHED DISKS
-    // =========================================================
+    // ============================================================
+    // UNATTACHED MANAGED DISKS
+    // ============================================================
 
-    private static void AnalyzeUnattachedDisks(
+    private static void AnalyzeUnattachedManagedDisks(
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
-        var disks =
-            resources.Where(
-                IsManagedDisk);
+        var disks = resources.Where(
+            resource => TypeEquals(
+                resource,
+                "Microsoft.Compute/disks"));
 
-        foreach (var resource in disks)
+        foreach (var disk in disks)
         {
             var properties =
-                GetEffectiveProperties(resource);
+                GetEffectiveProperties(disk);
 
             if (!properties.HasValue)
-            {
                 continue;
-            }
-
-            var managedBy =
-                GetString(
-                    properties.Value,
-                    "managedBy");
-
-            if (!string.IsNullOrWhiteSpace(managedBy))
-            {
-                continue;
-            }
 
             var diskState =
                 GetString(
                     properties.Value,
                     "diskState");
 
-            if (!string.IsNullOrWhiteSpace(diskState) &&
-                !string.Equals(
+            // Consideriamo orphan solo quando Azure espone
+            // esplicitamente lo stato Unattached.
+            //
+            // Non deduciamo lo stato dall'assenza di managedBy,
+            // perché questo potrebbe generare falsi positivi.
+            if (!string.Equals(
                     diskState,
                     "Unattached",
                     StringComparison.OrdinalIgnoreCase))
@@ -75,283 +63,164 @@ public sealed class CostAnalyzer : IAnalyzer
 
             findings.Add(
                 new Finding(
-                    Id:
-                        Guid.NewGuid().ToString(),
-
-                    Category:
-                        Category.Cost,
-
-                    Severity:
-                        Severity.High,
-
-                    RuleId:
-                        "DISK-UNATTACHED",
-
-                    Title:
-                        "Disco gestito non collegato",
-
+                    Id: Guid.NewGuid().ToString(),
+                    Category: Category.Cost,
+                    Severity: Severity.Medium,
+                    RuleId: "DISK-UNATTACHED",
+                    Title: "Managed Disk non associato",
                     Description:
-                        $"Il disco '{resource.Name}' " +
-                        "non risulta collegato ad alcuna VM.",
-
+                        $"Il managed disk '{ResourceName(disk)}' " +
+                        "risulta esplicitamente nello stato Unattached.",
                     Impact:
-                        "Il disco può generare un costo ricorrente " +
-                        "senza essere utilizzato.",
-
+                        "Il disco può continuare a generare costi di storage " +
+                        "pur non essendo attualmente associato a una Virtual Machine.",
                     Recommendation:
-                        "Verificare il disco, conservarne uno snapshot " +
-                        "se necessario e quindi eliminarlo.",
-
-                    ResourceName:
-                        resource.Name,
-
-                    ResourceType:
-                        resource.Type,
-
-                    MonthlySavingEur:
-                        EstimateDiskSaving(
-                            properties.Value),
-
+                        "Verificare se il disco è ancora necessario. " +
+                        "Se non è richiesto, valutarne la rimozione dopo aver " +
+                        "verificato backup, retention e requisiti di recupero.",
+                    ResourceName: ResourceName(disk),
+                    ResourceType: ResourceType(disk),
+                    ResourceId: ResourceId(disk),
                     AzureCli:
-                        $"az disk delete " +
-                        $"--ids \"{resource.Id}\" --yes",
-
-                    ResourceId:
-                        resource.Id));
+                        $"az disk show " +
+                        $"--ids \"{ResourceId(disk)}\""));
         }
     }
 
-    // =========================================================
-    // ORPHAN PUBLIC IP
-    // =========================================================
+    // ============================================================
+    // ORPHAN PUBLIC IP ADDRESSES
+    // ============================================================
 
-    private static void AnalyzeOrphanPublicIps(
+    private static void AnalyzeOrphanPublicIpAddresses(
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
-        var publicIps =
-            resources.Where(
-                IsPublicIp);
+        var publicIps = resources.Where(
+            resource => TypeEquals(
+                resource,
+                "Microsoft.Network/publicIPAddresses"));
 
-        foreach (var resource in publicIps)
+        foreach (var publicIp in publicIps)
         {
             var properties =
-                GetEffectiveProperties(resource);
+                GetEffectiveProperties(publicIp);
 
             if (!properties.HasValue)
-            {
                 continue;
-            }
 
-            var ipConfiguration =
-                GetProperty(
+            // Se la proprietà non esiste, non abbiamo abbastanza
+            // informazioni per dichiarare l'IP orphan.
+            if (!TryGetProperty(
                     properties.Value,
-                    "ipConfiguration");
-
-            /*
-             * Un Public IP è considerato orphan quando
-             * ipConfiguration è esplicitamente null.
-             *
-             * Se la proprietà non è presente, non assumiamo
-             * automaticamente che l'IP sia inutilizzato.
-             */
-            if (!ipConfiguration.HasValue ||
-                ipConfiguration.Value.ValueKind !=
-                    JsonValueKind.Null)
+                    "ipConfiguration",
+                    out var ipConfiguration))
             {
                 continue;
             }
+
+            if (ipConfiguration.ValueKind != JsonValueKind.Null)
+                continue;
 
             findings.Add(
                 new Finding(
-                    Id:
-                        Guid.NewGuid().ToString(),
-
-                    Category:
-                        Category.Cost,
-
-                    Severity:
-                        Severity.Medium,
-
-                    RuleId:
-                        "PIP-ORPHAN",
-
-                    Title:
-                        "Indirizzo IP pubblico non associato",
-
+                    Id: Guid.NewGuid().ToString(),
+                    Category: Category.Cost,
+                    Severity: Severity.Low,
+                    RuleId: "PIP-ORPHAN",
+                    Title: "Public IP non associato",
                     Description:
-                        $"L'IP pubblico '{resource.Name}' " +
+                        $"Il Public IP '{ResourceName(publicIp)}' " +
                         "non risulta associato ad alcuna risorsa.",
-
                     Impact:
-                        "Possibile costo ricorrente non necessario.",
-
+                        "Un Public IP non utilizzato può generare costi " +
+                        "senza fornire alcun valore operativo.",
                     Recommendation:
-                        "Verificare che l'IP non sia necessario " +
-                        "e rimuoverlo se inutilizzato.",
-
-                    ResourceName:
-                        resource.Name,
-
-                    ResourceType:
-                        resource.Type,
-
+                        "Verificare se l'indirizzo è riservato per un utilizzo futuro. " +
+                        "Se non necessario, valutarne la rimozione.",
+                    ResourceName: ResourceName(publicIp),
+                    ResourceType: ResourceType(publicIp),
+                    ResourceId: ResourceId(publicIp),
                     AzureCli:
-                        $"az network public-ip delete " +
-                        $"--ids \"{resource.Id}\"",
-
-                    ResourceId:
-                        resource.Id));
+                        $"az network public-ip show " +
+                        $"--ids \"{ResourceId(publicIp)}\""));
         }
     }
 
-    // =========================================================
-    // MANAGED DISK STATE
-    // =========================================================
+    // ============================================================
+    // HELPERS
+    // ============================================================
 
-    private static void AnalyzeUnusedManagedDisks(
-        IReadOnlyList<AzureResource> resources,
-        List<Finding> findings)
-    {
-        /*
-         * Questa analisi è intenzionalmente vuota.
-         *
-         * DISK-UNATTACHED identifica già i managed disk
-         * non collegati.
-         *
-         * Manteniamo il metodo per evitare di perdere il punto
-         * di estensione per future regole specifiche sullo stato
-         * del disco.
-         */
-    }
-
-    // =========================================================
-    // COST ESTIMATION
-    // =========================================================
-
-    private static double EstimateDiskSaving(
-        JsonElement properties)
-    {
-        if (!properties.TryGetProperty(
-                "diskSizeGB",
-                out var sizeElement))
-        {
-            return 0;
-        }
-
-        if (!sizeElement.TryGetDouble(
-                out var sizeGb))
-        {
-            return 0;
-        }
-
-        if (sizeGb <= 0)
-        {
-            return 0;
-        }
-
-        /*
-         * Stima volutamente conservativa.
-         *
-         * Non rappresenta un prezzo Azure ufficiale.
-         * Serve solamente a fornire un ordine di grandezza
-         * del possibile saving mensile.
-         */
-        const double estimatedEurPerGbMonth =
-            0.06;
-
-        return Math.Round(
-            sizeGb * estimatedEurPerGbMonth,
-            2);
-    }
-
-    // =========================================================
-    // RESOURCE HELPERS
-    // =========================================================
-
-    private static bool IsManagedDisk(
-        AzureResource resource)
+    private static bool TypeEquals(
+        AzureResource resource,
+        string type)
     {
         return string.Equals(
             resource.Type,
-            "Microsoft.Compute/disks",
+            type,
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsPublicIp(
+    private static string ResourceName(
         AzureResource resource)
     {
-        return string.Equals(
-            resource.Type,
-            "Microsoft.Network/publicIPAddresses",
-            StringComparison.OrdinalIgnoreCase);
+        return string.IsNullOrWhiteSpace(resource.Name)
+            ? "(senza nome)"
+            : resource.Name;
     }
 
-    // =========================================================
-    // EFFECTIVE PROPERTIES
-    // =========================================================
+    private static string ResourceType(
+        AzureResource resource)
+    {
+        return resource.Type ?? "(tipo sconosciuto)";
+    }
+
+    private static string ResourceId(
+        AzureResource resource)
+    {
+        return resource.Id ?? string.Empty;
+    }
 
     private static JsonElement? GetEffectiveProperties(
         AzureResource resource)
     {
-        /*
-         * L'enrichment ARM ha priorità rispetto al payload
-         * originale proveniente da Resource Graph.
-         */
-        if (resource.Enrichment?.Success == true &&
-            resource.Enrichment.ArmResource.HasValue)
+        if (resource.Enrichment?.ArmResource is JsonElement armResource)
         {
-            var arm =
-                resource.Enrichment.ArmResource.Value;
-
-            if (arm.TryGetProperty(
+            if (armResource.ValueKind == JsonValueKind.Object &&
+                armResource.TryGetProperty(
                     "properties",
-                    out var armProperties))
+                    out var enrichedProperties))
             {
-                return armProperties;
+                return enrichedProperties;
             }
         }
 
-        /*
-         * Fallback sul payload Resource Graph.
-         */
-        if (resource.Properties.HasValue)
-        {
-            return resource.Properties.Value;
-        }
-
-        return null;
+        return resource.Properties;
     }
-
-    // =========================================================
-    // JSON HELPERS
-    // =========================================================
 
     private static string? GetString(
         JsonElement element,
-        string property)
+        string propertyName)
     {
         if (!element.TryGetProperty(
-                property,
-                out var value))
+                propertyName,
+                out var property))
         {
             return null;
         }
 
-        return value.ValueKind ==
-               JsonValueKind.String
-            ? value.GetString()
-            : value.ToString();
+        if (property.ValueKind != JsonValueKind.String)
+            return null;
+
+        return property.GetString();
     }
 
-    private static JsonElement? GetProperty(
+    private static bool TryGetProperty(
         JsonElement element,
-        string property)
+        string propertyName,
+        out JsonElement value)
     {
         return element.TryGetProperty(
-                property,
-                out var value)
-            ? value
-            : null;
+            propertyName,
+            out value);
     }
 }
