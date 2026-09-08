@@ -42,7 +42,7 @@ public sealed class CostAnalyzer : IAnalyzer
         foreach (var resource in disks)
         {
             var properties =
-                GetEffectiveProperties(resource);
+                resource.GetEffectiveProperties();
 
             if (!properties.HasValue)
             {
@@ -136,7 +136,7 @@ public sealed class CostAnalyzer : IAnalyzer
         foreach (var resource in publicIps)
         {
             var properties =
-                GetEffectiveProperties(resource);
+                resource.GetEffectiveProperties();
 
             if (!properties.HasValue)
             {
@@ -288,42 +288,6 @@ public sealed class CostAnalyzer : IAnalyzer
     }
 
     // =========================================================
-    // EFFECTIVE PROPERTIES
-    // =========================================================
-
-    private static JsonElement? GetEffectiveProperties(
-        AzureResource resource)
-    {
-        /*
-         * L'enrichment ARM ha priorità rispetto al payload
-         * originale proveniente da Resource Graph.
-         */
-        if (resource.Enrichment?.Success == true &&
-            resource.Enrichment.ArmResource.HasValue)
-        {
-            var arm =
-                resource.Enrichment.ArmResource.Value;
-
-            if (arm.TryGetProperty(
-                    "properties",
-                    out var armProperties))
-            {
-                return armProperties;
-            }
-        }
-
-        /*
-         * Fallback sul payload Resource Graph.
-         */
-        if (resource.Properties.HasValue)
-        {
-            return resource.Properties.Value;
-        }
-
-        return null;
-    }
-
-    // =========================================================
     // JSON HELPERS
     // =========================================================
 
@@ -349,8 +313,8 @@ public sealed class CostAnalyzer : IAnalyzer
         string property)
     {
         return element.TryGetProperty(
-                property,
-                out var value)
+            property,
+            out var value)
             ? value
             : null;
     }

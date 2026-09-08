@@ -27,6 +27,7 @@ public sealed class AzureResource
     public AzureResourceEnrichment? Enrichment { get; set; }
 
     public List<AzureResourceRelationship> Relationships { get; } = [];
+
     public AzureResource(
         string id,
         string name,
@@ -55,6 +56,39 @@ public sealed class AzureResource
         Properties = properties;
 
         Raw = raw.Clone();
+    }
+
+    /// <summary>
+    /// Restituisce le proprietà ARM più complete disponibili per la risorsa.
+    ///
+    /// L'enrichment ARM ha priorità rispetto al payload originale
+    /// proveniente da Azure Resource Graph.
+    ///
+    /// Se l'enrichment non è disponibile o non contiene "properties",
+    /// viene utilizzato il payload originale di Resource Graph.
+    /// </summary>
+    public JsonElement? GetEffectiveProperties()
+    {
+        if (Enrichment?.Success == true &&
+            Enrichment.ArmResource.HasValue)
+        {
+            var armResource =
+                Enrichment.ArmResource.Value;
+
+            if (armResource.TryGetProperty(
+                    "properties",
+                    out var armProperties))
+            {
+                return armProperties;
+            }
+        }
+
+        if (Properties.HasValue)
+        {
+            return Properties.Value;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -213,7 +247,7 @@ public sealed class AzureResource
                 "tags",
                 out var tags) ||
             tags.ValueKind !=
-                JsonValueKind.Object)
+            JsonValueKind.Object)
         {
             return result;
         }

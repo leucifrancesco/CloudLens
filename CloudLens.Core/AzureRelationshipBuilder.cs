@@ -7,6 +7,12 @@ public sealed class AzureRelationshipBuilder
     public void Build(
         IReadOnlyList<AzureResource> resources)
     {
+        if (resources == null)
+        {
+            throw new ArgumentNullException(
+                nameof(resources));
+        }
+
         if (resources.Count == 0)
         {
             return;
@@ -15,10 +21,16 @@ public sealed class AzureRelationshipBuilder
         var resourcesById =
             resources
                 .Where(
-                    x => !string.IsNullOrWhiteSpace(x.Id))
+                    resource =>
+                        !string.IsNullOrWhiteSpace(
+                            resource.Id))
+                .GroupBy(
+                    resource =>
+                        NormalizeId(resource.Id),
+                    StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    x => NormalizeId(x.Id),
-                    x => x,
+                    group => group.Key,
+                    group => group.First(),
                     StringComparer.OrdinalIgnoreCase);
 
         foreach (var resource in resources)
@@ -55,10 +67,11 @@ public sealed class AzureRelationshipBuilder
         IReadOnlyList<AzureResource> resources,
         IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
-        foreach (var vm in resources.Where(IsVirtualMachine))
+        foreach (var vm in
+                 resources.Where(IsVirtualMachine))
         {
             var properties =
-                GetEffectiveProperties(vm);
+                vm.GetEffectiveProperties();
 
             if (!properties.HasValue)
             {
@@ -91,7 +104,8 @@ public sealed class AzureRelationshipBuilder
                     AddRelationship(
                         vm,
                         nicId,
-                        "NetworkInterface");
+                        "NetworkInterface",
+                        resourcesById);
                 }
             }
 
@@ -117,7 +131,8 @@ public sealed class AzureRelationshipBuilder
                 AddRelationship(
                     vm,
                     diskId,
-                    "OsDisk");
+                    "OsDisk",
+                    resourcesById);
             }
 
             // -------------------------------------------------
@@ -147,7 +162,8 @@ public sealed class AzureRelationshipBuilder
                     AddRelationship(
                         vm,
                         diskId,
-                        "DataDisk");
+                        "DataDisk",
+                        resourcesById);
                 }
             }
         }
@@ -161,10 +177,11 @@ public sealed class AzureRelationshipBuilder
         IReadOnlyList<AzureResource> resources,
         IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
-        foreach (var nic in resources.Where(IsNetworkInterface))
+        foreach (var nic in
+                 resources.Where(IsNetworkInterface))
         {
             var properties =
-                GetEffectiveProperties(nic);
+                nic.GetEffectiveProperties();
 
             if (!properties.HasValue)
             {
@@ -184,7 +201,8 @@ public sealed class AzureRelationshipBuilder
             AddRelationship(
                 nic,
                 nsgId,
-                "NetworkSecurityGroup");
+                "NetworkSecurityGroup",
+                resourcesById);
 
             // -------------------------------------------------
             // IP CONFIGURATIONS
@@ -212,6 +230,7 @@ public sealed class AzureRelationshipBuilder
                 }
 
                 // NIC -> Subnet
+
                 var subnetId =
                     GetString(
                         ipProperties,
@@ -221,9 +240,11 @@ public sealed class AzureRelationshipBuilder
                 AddRelationship(
                     nic,
                     subnetId,
-                    "Subnet");
+                    "Subnet",
+                    resourcesById);
 
                 // NIC -> Public IP
+
                 var publicIpId =
                     GetString(
                         ipProperties,
@@ -233,7 +254,8 @@ public sealed class AzureRelationshipBuilder
                 AddRelationship(
                     nic,
                     publicIpId,
-                    "PublicIPAddress");
+                    "PublicIPAddress",
+                    resourcesById);
             }
         }
     }
@@ -246,10 +268,11 @@ public sealed class AzureRelationshipBuilder
         IReadOnlyList<AzureResource> resources,
         IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
-        foreach (var subnet in resources.Where(IsSubnet))
+        foreach (var subnet in
+                 resources.Where(IsSubnet))
         {
             var properties =
-                GetEffectiveProperties(subnet);
+                subnet.GetEffectiveProperties();
 
             if (!properties.HasValue)
             {
@@ -269,7 +292,8 @@ public sealed class AzureRelationshipBuilder
             AddRelationship(
                 subnet,
                 nsgId,
-                "NetworkSecurityGroup");
+                "NetworkSecurityGroup",
+                resourcesById);
 
             // -------------------------------------------------
             // SUBNET -> ROUTE TABLE
@@ -284,7 +308,8 @@ public sealed class AzureRelationshipBuilder
             AddRelationship(
                 subnet,
                 routeTableId,
-                "RouteTable");
+                "RouteTable",
+                resourcesById);
 
             // -------------------------------------------------
             // SUBNET -> NAT GATEWAY
@@ -299,7 +324,8 @@ public sealed class AzureRelationshipBuilder
             AddRelationship(
                 subnet,
                 natGatewayId,
-                "NatGateway");
+                "NatGateway",
+                resourcesById);
         }
     }
 
@@ -315,7 +341,7 @@ public sealed class AzureRelationshipBuilder
                  resources.Where(IsPrivateEndpoint))
         {
             var properties =
-                GetEffectiveProperties(endpoint);
+                endpoint.GetEffectiveProperties();
 
             if (!properties.HasValue)
             {
@@ -335,7 +361,8 @@ public sealed class AzureRelationshipBuilder
             AddRelationship(
                 endpoint,
                 subnetId,
-                "Subnet");
+                "Subnet",
+                resourcesById);
 
             // -------------------------------------------------
             // PRIVATE ENDPOINT -> TARGET
@@ -370,7 +397,8 @@ public sealed class AzureRelationshipBuilder
                 AddRelationship(
                     endpoint,
                     resourceId,
-                    "PrivateLinkTarget");
+                    "PrivateLinkTarget",
+                    resourcesById);
             }
         }
     }
@@ -383,15 +411,17 @@ public sealed class AzureRelationshipBuilder
         IReadOnlyList<AzureResource> resources,
         IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
-        // Attualmente le relazioni dei Managed Disk
-        // vengono costruite dal lato VM:
-        //
-        // VM -> OsDisk
-        // VM -> DataDisk
-        //
-        // Questo metodo viene mantenuto come punto di estensione
-        // per eventuali relazioni inverse o ulteriori proprietà
-        // dei Managed Disk.
+        /*
+         * Le relazioni dei Managed Disk vengono costruite
+         * dal lato VM:
+         *
+         * VM -> OsDisk
+         * VM -> DataDisk
+         *
+         * Questo metodo rimane come punto di estensione
+         * per eventuali relazioni inverse o ulteriori
+         * informazioni specifiche dei Managed Disk.
+         */
     }
 
     // =========================================================
@@ -401,9 +431,19 @@ public sealed class AzureRelationshipBuilder
     private static void AddRelationship(
         AzureResource source,
         string? targetId,
-        string relationshipType)
+        string relationshipType,
+        IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
         if (string.IsNullOrWhiteSpace(targetId))
+        {
+            return;
+        }
+
+        var normalizedTargetId =
+            NormalizeId(targetId);
+
+        if (!resourcesById.ContainsKey(
+                normalizedTargetId))
         {
             return;
         }
@@ -414,7 +454,7 @@ public sealed class AzureRelationshipBuilder
                     NormalizeId(source.Id),
 
                 TargetResourceId:
-                    NormalizeId(targetId),
+                    normalizedTargetId,
 
                 RelationshipType:
                     relationshipType);
@@ -425,54 +465,6 @@ public sealed class AzureRelationshipBuilder
             source.Relationships.Add(
                 relationship);
         }
-    }
-
-    // =========================================================
-    // EFFECTIVE PROPERTIES
-    // =========================================================
-
-    private static JsonElement? GetEffectiveProperties(
-        AzureResource resource)
-    {
-        // -----------------------------------------------------
-        // Preferisce i dati ottenuti direttamente da ARM
-        // tramite enrichment.
-        // -----------------------------------------------------
-
-        if (resource.Enrichment?.Success == true &&
-            resource.Enrichment.ArmResource.HasValue)
-        {
-            var arm =
-                resource.Enrichment.ArmResource.Value;
-
-            if (TryGetProperty(
-                    arm,
-                    "properties",
-                    out var properties))
-            {
-                return properties;
-            }
-        }
-
-        // -----------------------------------------------------
-        // Fallback: dati della discovery originale.
-        // -----------------------------------------------------
-
-        if (resource.Properties.HasValue)
-        {
-            var properties =
-                resource.Properties.Value;
-
-            if (properties.ValueKind !=
-                JsonValueKind.Undefined &&
-                properties.ValueKind !=
-                JsonValueKind.Null)
-            {
-                return properties;
-            }
-        }
-
-        return null;
     }
 
     // =========================================================
@@ -572,6 +564,8 @@ public sealed class AzureRelationshipBuilder
     private static string NormalizeId(
         string id)
     {
-        return id.Trim().TrimEnd('/');
+        return id
+            .Trim()
+            .TrimEnd('/');
     }
 }

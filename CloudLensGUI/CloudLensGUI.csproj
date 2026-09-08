@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\CloudLens.Core\CloudLens.Core.csproj" />
+    <Resource Include="C:\Users\zdjpu\Documents\CloudLens\assets\CloudLens.ico" />
   </ItemGroup>
 </Project>

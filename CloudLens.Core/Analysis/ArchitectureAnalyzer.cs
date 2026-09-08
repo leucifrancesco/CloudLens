@@ -44,12 +44,15 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
 
         foreach (var vm in vms)
         {
-            if (vm.Properties is not JsonElement properties)
+            var properties =
+                vm.GetEffectiveProperties();
+
+            if (!properties.HasValue)
             {
                 continue;
             }
 
-            if (!properties.TryGetProperty(
+            if (!properties.Value.TryGetProperty(
                     "networkProfile",
                     out var networkProfile))
             {
@@ -70,7 +73,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                         "id",
                         out var nicIdElement) ||
                     nicIdElement.ValueKind !=
-                    JsonValueKind.String)
+                        JsonValueKind.String)
                 {
                     continue;
                 }
@@ -126,7 +129,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                     "name",
                     out var skuNameElement) ||
                 skuNameElement.ValueKind !=
-                JsonValueKind.String)
+                    JsonValueKind.String)
             {
                 continue;
             }
