@@ -12,7 +12,11 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
         var findings =
             new List<Finding>();
 
-        AnalyzeVmPublicIpArchitecture(
+        AnalyzeVirtualMachines(
+            resources,
+            findings);
+
+        AnalyzeVirtualMachineScaleSets(
             resources,
             findings);
 
@@ -29,10 +33,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
     }
 
     // =========================================================
-    // VM PUBLIC IP
+    // VIRTUAL MACHINES
     // =========================================================
 
-    private static void AnalyzeVmPublicIpArchitecture(
+    private static void AnalyzeVirtualMachines(
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
@@ -52,54 +56,196 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                 continue;
             }
 
-            if (!properties.Value.TryGetProperty(
-                    "networkProfile",
-                    out var networkProfile))
+            var hasAvailabilityZone =
+                HasAvailabilityZone(
+                    properties.Value);
+
+            var hasAvailabilitySet =
+                HasAvailabilitySet(
+                    properties.Value);
+
+            if (hasAvailabilityZone ||
+                hasAvailabilitySet)
             {
                 continue;
             }
 
-            if (!networkProfile.TryGetProperty(
-                    "networkInterfaces",
-                    out var interfaces) ||
-                interfaces.ValueKind != JsonValueKind.Array)
+            findings.Add(
+                new Finding(
+                    Id:
+                        Guid.NewGuid().ToString(),
+
+                    Category:
+                        Category.Reliability,
+
+                    Severity:
+                        Severity.Low,
+
+                    RuleId:
+                        "VM-NO-HA-DOMAIN",
+
+                    Title:
+                        "VM senza Availability Zone o Availability Set",
+
+                    Description:
+                        $"La VM '{vm.Name}' non risulta associata " +
+                        "ad una Availability Zone o ad un Availability Set.",
+
+                    Impact:
+                        "La VM può rimanere maggiormente dipendente " +
+                        "da un singolo failure domain della region.",
+
+                    Recommendation:
+                        "Valutare Availability Zone o Availability Set " +
+                        "in funzione dei requisiti di disponibilità " +
+                        "e della regione utilizzata.",
+
+                    ResourceName:
+                        vm.Name,
+
+                    ResourceType:
+                        vm.Type,
+
+                    ResourceId:
+                        vm.Id));
+        }
+    }
+
+    // =========================================================
+    // VM SCALE SETS
+    // =========================================================
+
+    private static void AnalyzeVirtualMachineScaleSets(
+        IReadOnlyList<AzureResource> resources,
+        List<Finding> findings)
+    {
+        var scaleSets =
+            resources.Where(
+                r => TypeEquals(
+                    r,
+                    "Microsoft.Compute/virtualMachineScaleSets"));
+
+        foreach (var scaleSet in scaleSets)
+        {
+            var properties =
+                scaleSet.GetEffectiveProperties();
+
+            if (!properties.HasValue)
             {
                 continue;
             }
 
-            foreach (var nic in interfaces.EnumerateArray())
+            var zones =
+                GetArray(
+                    properties.Value,
+                    "zones");
+
+            var hasAvailabilityZone =
+                zones.HasValue &&
+                zones.Value.ValueKind == JsonValueKind.Array &&
+                zones.Value.GetArrayLength() > 0;
+
+            if (!hasAvailabilityZone)
             {
-                if (!nic.TryGetProperty(
-                        "id",
-                        out var nicIdElement) ||
-                    nicIdElement.ValueKind !=
-                        JsonValueKind.String)
-                {
-                    continue;
-                }
+                findings.Add(
+                    new Finding(
+                        Id:
+                            Guid.NewGuid().ToString(),
 
-                var nicId =
-                    nicIdElement.GetString();
+                        Category:
+                            Category.Reliability,
 
-                if (string.IsNullOrWhiteSpace(nicId))
-                {
-                    continue;
-                }
+                        Severity:
+                            Severity.Low,
 
-                // La NIC viene verificata contro il modello
-                // normalizzato delle risorse scoperte.
-                var hasNic =
-                    resources.Any(
-                        r =>
-                            string.Equals(
-                                r.Id,
-                                nicId,
-                                StringComparison.OrdinalIgnoreCase));
+                        RuleId:
+                            "VMSS-NO-ZONE",
 
-                if (!hasNic)
-                {
-                    continue;
-                }
+                        Title:
+                            "VM Scale Set senza Availability Zone configurata",
+
+                        Description:
+                            $"Il VM Scale Set '{scaleSet.Name}' " +
+                            "non risulta associato ad Availability Zone.",
+
+                        Impact:
+                            "Le istanze possono rimanere concentrate " +
+                            "in un singolo failure domain.",
+
+                        Recommendation:
+                            "Valutare una configurazione zonale " +
+                            "quando supportata dalla workload architecture.",
+
+                        ResourceName:
+                            scaleSet.Name,
+
+                        ResourceType:
+                            scaleSet.Type,
+
+                        ResourceId:
+                            scaleSet.Id));
+            }
+
+            var sku =
+                scaleSet.Sku;
+
+            if (!sku.HasValue)
+            {
+                continue;
+            }
+
+            if (!sku.Value.TryGetProperty(
+                    "capacity",
+                    out var capacity))
+            {
+                continue;
+            }
+
+            if (!capacity.TryGetInt32(
+                    out var instanceCount))
+            {
+                continue;
+            }
+
+            if (instanceCount <= 1)
+            {
+                findings.Add(
+                    new Finding(
+                        Id:
+                            Guid.NewGuid().ToString(),
+
+                        Category:
+                            Category.Reliability,
+
+                        Severity:
+                            Severity.Medium,
+
+                        RuleId:
+                            "VMSS-SINGLE-INSTANCE",
+
+                        Title:
+                            "VM Scale Set con una sola istanza",
+
+                        Description:
+                            $"Il VM Scale Set '{scaleSet.Name}' " +
+                            "risulta configurato con una sola istanza.",
+
+                        Impact:
+                            "La perdita della singola istanza può " +
+                            "causare indisponibilità del workload.",
+
+                        Recommendation:
+                            "Valutare almeno due istanze quando " +
+                            "il requisito applicativo richiede alta disponibilità.",
+
+                        ResourceName:
+                            scaleSet.Name,
+
+                        ResourceType:
+                            scaleSet.Type,
+
+                        ResourceId:
+                            scaleSet.Id));
             }
         }
     }
@@ -180,7 +326,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                             storage.Name,
 
                         ResourceType:
-                            storage.Type));
+                            storage.Type,
+
+                        ResourceId:
+                            storage.Id));
             }
         }
     }
@@ -244,13 +393,57 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                         subscription.Name,
 
                     ResourceType:
-                        "Microsoft.Resources/subscriptions"));
+                        "Microsoft.Resources/subscriptions",
+
+                    ResourceId:
+                        subscription.Id));
         }
     }
 
     // =========================================================
     // HELPERS
     // =========================================================
+
+    private static bool HasAvailabilityZone(
+        JsonElement properties)
+    {
+        var zones =
+            GetArray(
+                properties,
+                "zones");
+
+        return zones.HasValue &&
+               zones.Value.ValueKind == JsonValueKind.Array &&
+               zones.Value.GetArrayLength() > 0;
+    }
+
+    private static bool HasAvailabilitySet(
+        JsonElement properties)
+    {
+        if (!properties.TryGetProperty(
+                "availabilitySet",
+                out var availabilitySet))
+        {
+            return false;
+        }
+
+        if (availabilitySet.ValueKind !=
+            JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!availabilitySet.TryGetProperty(
+                "id",
+                out var id))
+        {
+            return false;
+        }
+
+        return id.ValueKind == JsonValueKind.String &&
+               !string.IsNullOrWhiteSpace(
+                   id.GetString());
+    }
 
     private static bool TypeEquals(
         AzureResource resource,
@@ -260,5 +453,19 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
             resource.Type,
             type,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static JsonElement? GetArray(
+        JsonElement element,
+        string property)
+    {
+        if (!element.TryGetProperty(
+                property,
+                out var value))
+        {
+            return null;
+        }
+
+        return value;
     }
 }

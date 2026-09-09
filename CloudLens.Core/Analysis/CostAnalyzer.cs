@@ -20,6 +20,10 @@ public sealed class CostAnalyzer : IAnalyzer
             resources,
             findings);
 
+        AnalyzePublicIpSku(
+            resources,
+            findings);
+
         AnalyzeUnusedManagedDisks(
             resources,
             findings);
@@ -148,13 +152,6 @@ public sealed class CostAnalyzer : IAnalyzer
                     properties.Value,
                     "ipConfiguration");
 
-            /*
-             * Un Public IP è considerato orphan quando
-             * ipConfiguration è esplicitamente null.
-             *
-             * Se la proprietà non è presente, non assumiamo
-             * automaticamente che l'IP sia inutilizzato.
-             */
             if (!ipConfiguration.HasValue ||
                 ipConfiguration.Value.ValueKind !=
                     JsonValueKind.Null)
@@ -206,6 +203,79 @@ public sealed class CostAnalyzer : IAnalyzer
     }
 
     // =========================================================
+    // PUBLIC IP SKU
+    // =========================================================
+
+    private static void AnalyzePublicIpSku(
+        IReadOnlyList<AzureResource> resources,
+        List<Finding> findings)
+    {
+        var publicIps =
+            resources.Where(
+                IsPublicIp);
+
+        foreach (var resource in publicIps)
+        {
+            if (resource.Sku is not JsonElement sku)
+            {
+                continue;
+            }
+
+            var skuName =
+                GetString(
+                    sku,
+                    "name");
+
+            if (!string.Equals(
+                    skuName,
+                    "Basic",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            findings.Add(
+                new Finding(
+                    Id:
+                        Guid.NewGuid().ToString(),
+
+                    Category:
+                        Category.Cost,
+
+                    Severity:
+                        Severity.Medium,
+
+                    RuleId:
+                        "PIP-BASIC-SKU",
+
+                    Title:
+                        "Public IP con SKU Basic",
+
+                    Description:
+                        $"L'IP pubblico '{resource.Name}' " +
+                        "utilizza lo SKU Basic.",
+
+                    Impact:
+                        "Lo SKU Basic è una configurazione legacy " +
+                        "e può richiedere migrazione verso Standard " +
+                        "in base al servizio e all'architettura.",
+
+                    Recommendation:
+                        "Verificare la compatibilità e pianificare " +
+                        "la migrazione a SKU Standard quando necessario.",
+
+                    ResourceName:
+                        resource.Name,
+
+                    ResourceType:
+                        resource.Type,
+
+                    ResourceId:
+                        resource.Id));
+        }
+    }
+
+    // =========================================================
     // MANAGED DISK STATE
     // =========================================================
 
@@ -214,14 +284,11 @@ public sealed class CostAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         /*
-         * Questa analisi è intenzionalmente vuota.
-         *
          * DISK-UNATTACHED identifica già i managed disk
          * non collegati.
          *
-         * Manteniamo il metodo per evitare di perdere il punto
-         * di estensione per future regole specifiche sullo stato
-         * del disco.
+         * Manteniamo il metodo come punto di estensione
+         * per future regole specifiche sullo stato del disco.
          */
     }
 
@@ -250,13 +317,6 @@ public sealed class CostAnalyzer : IAnalyzer
             return 0;
         }
 
-        /*
-         * Stima volutamente conservativa.
-         *
-         * Non rappresenta un prezzo Azure ufficiale.
-         * Serve solamente a fornire un ordine di grandezza
-         * del possibile saving mensile.
-         */
         const double estimatedEurPerGbMonth =
             0.06;
 
@@ -313,8 +373,8 @@ public sealed class CostAnalyzer : IAnalyzer
         string property)
     {
         return element.TryGetProperty(
-            property,
-            out var value)
+                property,
+                out var value)
             ? value
             : null;
     }

@@ -6,6 +6,8 @@ public sealed class AssessmentEngine
 {
     private readonly IReadOnlyList<IAnalyzer> _analyzers;
 
+    private readonly MetricAnalyzer _metricAnalyzer;
+
     public AssessmentEngine(
         IEnumerable<IAnalyzer> analyzers)
     {
@@ -27,15 +29,25 @@ public sealed class AssessmentEngine
                 "È necessario registrare almeno un analyzer.",
                 nameof(analyzers));
         }
-    }
 
-    // =========================================================
-    // ASSESSMENT
-    // =========================================================
+        _metricAnalyzer =
+            new MetricAnalyzer();
+    }
 
     public ScanResult Analyze(
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
+    {
+        return Analyze(
+            resources,
+            subscription,
+            []);
+    }
+
+    public ScanResult Analyze(
+        IReadOnlyList<AzureResource> resources,
+        AzureSubscription subscription,
+        IReadOnlyList<MetricProfile> metrics)
     {
         if (resources == null)
         {
@@ -49,50 +61,41 @@ public sealed class AssessmentEngine
                 nameof(subscription));
         }
 
-        // -----------------------------------------------------
-        // 1. EXECUTE ANALYZERS
-        // -----------------------------------------------------
+        if (metrics == null)
+        {
+            throw new ArgumentNullException(
+                nameof(metrics));
+        }
 
         var findings =
             CollectFindings(
                 resources,
                 subscription);
 
-        // -----------------------------------------------------
-        // 2. NORMALIZE FINDINGS
-        // -----------------------------------------------------
+        if (metrics.Count > 0)
+        {
+            findings.AddRange(
+                _metricAnalyzer.Analyze(
+                    resources,
+                    metrics,
+                    subscription));
+        }
 
         var normalizedFindings =
             NormalizeFindings(
                 findings);
 
-        // -----------------------------------------------------
-        // 3. BUILD RESOURCE STATISTICS
-        // -----------------------------------------------------
-
         var stats =
             BuildStats(
                 resources);
-
-        // -----------------------------------------------------
-        // 4. CALCULATE CATEGORY SCORES
-        // -----------------------------------------------------
 
         var scores =
             ComputeScores(
                 normalizedFindings);
 
-        // -----------------------------------------------------
-        // 5. CALCULATE OVERALL SCORE
-        // -----------------------------------------------------
-
         var overallScore =
             CalculateOverallScore(
                 scores);
-
-        // -----------------------------------------------------
-        // 6. BUILD RESULT
-        // -----------------------------------------------------
 
         return new ScanResult
         {
@@ -112,13 +115,12 @@ public sealed class AssessmentEngine
                 scores,
 
             Score =
-                overallScore
+                overallScore,
+
+            MetricProfiles =
+                metrics.ToList()
         };
     }
-
-    // =========================================================
-    // ANALYZER EXECUTION
-    // =========================================================
 
     private List<Finding> CollectFindings(
         IReadOnlyList<AzureResource> resources,
@@ -145,10 +147,6 @@ public sealed class AssessmentEngine
 
         return findings;
     }
-
-    // =========================================================
-    // FINDING NORMALIZATION
-    // =========================================================
 
     private static List<Finding> NormalizeFindings(
         IEnumerable<Finding> findings)
@@ -204,10 +202,6 @@ public sealed class AssessmentEngine
         };
     }
 
-    // =========================================================
-    // RESOURCE STATISTICS
-    // =========================================================
-
     private static ScanStats BuildStats(
         IReadOnlyList<AzureResource> resources)
     {
@@ -253,10 +247,6 @@ public sealed class AssessmentEngine
                 0
         };
     }
-
-    // =========================================================
-    // SCORE
-    // =========================================================
 
     private static Dictionary<Category, int> ComputeScores(
         IReadOnlyList<Finding> findings)
@@ -310,10 +300,6 @@ public sealed class AssessmentEngine
         return (int)Math.Round(
             scores.Values.Average());
     }
-
-    // =========================================================
-    // HELPERS
-    // =========================================================
 
     private static bool TypeEquals(
         AzureResource resource,

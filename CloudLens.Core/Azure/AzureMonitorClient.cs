@@ -112,6 +112,15 @@ public sealed class AzureMonitorClient
             return;
         }
 
+        var metricNames =
+            GetRelevantMetricNames(
+                resourceType);
+
+        if (metricNames.Count == 0)
+        {
+            return;
+        }
+
         try
         {
             await semaphore.WaitAsync(
@@ -129,7 +138,17 @@ public sealed class AzureMonitorClient
                     return;
                 }
 
-                foreach (var definition in definitions)
+                var selectedDefinitions =
+                    definitions
+                        .Where(
+                            definition =>
+                                metricNames.Contains(
+                                    definition.Name,
+                                    StringComparer.OrdinalIgnoreCase))
+                        .ToList();
+
+                foreach (var definition in
+                         selectedDefinitions)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
@@ -148,6 +167,10 @@ public sealed class AzureMonitorClient
                         {
                             result.Add(profile);
                         }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
                     }
                     catch
                     {
@@ -204,7 +227,9 @@ public sealed class AzureMonitorClient
 
             if (!json.RootElement.TryGetProperty(
                     "value",
-                    out var values))
+                    out var values) ||
+                values.ValueKind !=
+                    JsonValueKind.Array)
             {
                 return [];
             }
@@ -313,7 +338,9 @@ public sealed class AzureMonitorClient
 
         if (!json.RootElement.TryGetProperty(
                 "value",
-                out var values))
+                out var values) ||
+            values.ValueKind !=
+                JsonValueKind.Array)
         {
             return [];
         }
@@ -352,7 +379,9 @@ public sealed class AzureMonitorClient
 
             if (!metric.TryGetProperty(
                     "timeseries",
-                    out var timeseries))
+                    out var timeseries) ||
+                timeseries.ValueKind !=
+                    JsonValueKind.Array)
             {
                 continue;
             }
@@ -362,7 +391,9 @@ public sealed class AzureMonitorClient
             {
                 if (!series.TryGetProperty(
                         "data",
-                        out var data))
+                        out var data) ||
+                    data.ValueKind !=
+                        JsonValueKind.Array)
                 {
                     continue;
                 }
@@ -469,6 +500,76 @@ public sealed class AzureMonitorClient
         }
 
         return result;
+    }
+
+    private static IReadOnlyList<string>
+        GetRelevantMetricNames(
+            string resourceType)
+    {
+        if (string.IsNullOrWhiteSpace(resourceType))
+        {
+            return [];
+        }
+
+        return resourceType.ToLowerInvariant() switch
+        {
+            "microsoft.compute/virtualmachines" =>
+                [
+                    "Percentage CPU",
+                    "Disk Read Bytes",
+                    "Disk Write Bytes",
+                    "Network In Total",
+                    "Network Out Total"
+                ],
+
+            "microsoft.web/sites" =>
+                [
+                    "CpuTime",
+                    "MemoryWorkingSet",
+                    "Requests",
+                    "Http5xx",
+                    "AverageResponseTime"
+                ],
+
+            "microsoft.sql/servers/databases" =>
+                [
+                    "dtu_consumption_percent",
+                    "cpu_percent",
+                    "storage_percent",
+                    "connection_successful",
+                    "connection_failed"
+                ],
+
+            "microsoft.storage/storageaccounts" =>
+                [
+                    "UsedCapacity",
+                    "Transactions",
+                    "Ingress",
+                    "Egress",
+                    "Availability"
+                ],
+
+            "microsoft.servicebus/namespaces" =>
+                [
+                    "IncomingMessages",
+                    "OutgoingMessages",
+                    "IncomingRequests",
+                    "OutgoingRequests",
+                    "ThrottledRequests"
+                ],
+
+            "microsoft.eventhub/namespaces" =>
+                [
+                    "IncomingMessages",
+                    "OutgoingMessages",
+                    "IncomingBytes",
+                    "OutgoingBytes",
+                    "ThrottledRequests"
+                ],
+
+            _ =>
+                []
+        };
     }
 
     private HttpRequestMessage CreateRequest(

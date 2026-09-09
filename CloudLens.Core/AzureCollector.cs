@@ -206,6 +206,10 @@ public sealed class AzureCollector
         relationshipBuilder.Build(
             resources);
 
+        // -----------------------------------------------------
+        // RESOURCE GRAPH
+        // -----------------------------------------------------
+
         var resourceGraph =
             new AzureResourceGraph(
                 resources);
@@ -222,7 +226,7 @@ public sealed class AzureCollector
         var rawResources =
             resources
                 .Select(
-                    x => x.Raw)
+                    resource => resource.Raw)
                 .ToList();
 
         var metricProfiles =
@@ -233,26 +237,12 @@ public sealed class AzureCollector
         // -----------------------------------------------------
         // ANALYSIS
         // -----------------------------------------------------
-        //
-        // Gli analyzer lavorano ora direttamente con il modello
-        // normalizzato AzureResource.
-        //
-        // Raw viene mantenuto esclusivamente dove necessario
-        // per componenti che non sono ancora stati migrati,
-        // come la raccolta delle metriche.
-        // -----------------------------------------------------
 
         var result =
             _assessmentEngine.Analyze(
                 resources,
-                subscription);
-
-        // -----------------------------------------------------
-        // METRICS
-        // -----------------------------------------------------
-
-        result.MetricProfiles =
-            metricProfiles;
+                subscription,
+                metricProfiles);
 
         // -----------------------------------------------------
         // DIAGNOSTICS
@@ -286,6 +276,10 @@ public sealed class AzureCollector
         Console.WriteLine(
             "=========================================================");
 
+        // -----------------------------------------------------
+        // GENERAL
+        // -----------------------------------------------------
+
         Console.WriteLine(
             $"Risorse scoperte : {resources.Count}");
 
@@ -295,13 +289,13 @@ public sealed class AzureCollector
         Console.WriteLine();
 
         // -----------------------------------------------------
-        // RESOURCE ENRICHMENT
+        // ARM ENRICHMENT
         // -----------------------------------------------------
 
         var enrichedCount =
             resources.Count(
-                x =>
-                    x.Enrichment?.Success == true);
+                resource =>
+                    resource.Enrichment?.Success == true);
 
         Console.WriteLine(
             "ARM ENRICHMENT:");
@@ -329,10 +323,17 @@ public sealed class AzureCollector
         var resourceGroups =
             resources
                 .GroupBy(
-                    x => x.Type,
+                    resource =>
+                        resource.Type,
                     StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(
-                    x => x.Count());
+                    group =>
+                        group.Count())
+                .ThenBy(
+                    group =>
+                        group.Key,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
         foreach (var group in resourceGroups)
         {
@@ -341,6 +342,49 @@ public sealed class AzureCollector
         }
 
         Console.WriteLine();
+
+        // -----------------------------------------------------
+        // RESOURCE PAYLOAD DIAGNOSTICS
+        // -----------------------------------------------------
+
+        Console.WriteLine(
+            "RESOURCE DETAILS:");
+
+        Console.WriteLine();
+
+        foreach (var group in resourceGroups)
+        {
+            Console.WriteLine(
+                $"--- {group.Key} ({group.Count()}) ---");
+
+            foreach (var resource in
+                     group.Take(5))
+            {
+                Console.WriteLine(
+                    $"Name: {resource.Name}");
+
+                Console.WriteLine(
+                    $"Id: {resource.Id}");
+
+                Console.WriteLine(
+                    $"Location: {resource.Location}");
+
+                Console.WriteLine(
+                    $"Resource Group: {resource.ResourceGroup}");
+
+                Console.WriteLine(
+                    $"Enrichment: " +
+                    $"{resource.Enrichment?.Success == true}");
+
+                Console.WriteLine(
+                    "Raw:");
+
+                Console.WriteLine(
+                    resource.Raw.GetRawText());
+
+                Console.WriteLine();
+            }
+        }
 
         // -----------------------------------------------------
         // RELATIONSHIPS
@@ -354,12 +398,20 @@ public sealed class AzureCollector
         var relationshipGroups =
             resources
                 .SelectMany(
-                    x => x.Relationships)
+                    resource =>
+                        resource.Relationships)
                 .GroupBy(
-                    x => x.RelationshipType,
+                    relationship =>
+                        relationship.RelationshipType,
                     StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(
-                    x => x.Count());
+                    group =>
+                        group.Count())
+                .ThenBy(
+                    group =>
+                        group.Key,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
         var totalRelationships =
             0;
@@ -379,7 +431,7 @@ public sealed class AzureCollector
             $"Relazioni totali: {totalRelationships}");
 
         // -----------------------------------------------------
-        // GRAPH TEST
+        // RESOURCE GRAPH
         // -----------------------------------------------------
 
         var vmCount =
@@ -407,11 +459,11 @@ public sealed class AzureCollector
         Console.WriteLine(
             $"NIC nel graph: {nicCount}");
 
-        Console.WriteLine();
-
         // -----------------------------------------------------
         // METRICS BY RESOURCE TYPE
         // -----------------------------------------------------
+
+        Console.WriteLine();
 
         Console.WriteLine(
             "METRICHE PER RESOURCE TYPE:");
@@ -421,10 +473,17 @@ public sealed class AzureCollector
         var metricGroups =
             metricProfiles
                 .GroupBy(
-                    x => x.ResourceType,
+                    metric =>
+                        metric.ResourceType,
                     StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(
-                    x => x.Count());
+                    group =>
+                        group.Count())
+                .ThenBy(
+                    group =>
+                        group.Key,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
         foreach (var group in metricGroups)
         {
@@ -432,11 +491,11 @@ public sealed class AzureCollector
                 $"{group.Key} -> {group.Count()}");
         }
 
-        Console.WriteLine();
-
         // -----------------------------------------------------
         // UNIQUE METRIC TYPES
         // -----------------------------------------------------
+
+        Console.WriteLine();
 
         Console.WriteLine(
             "METRICHE UNICHE:");
@@ -446,15 +505,20 @@ public sealed class AzureCollector
         var metricNames =
             metricProfiles
                 .GroupBy(
-                    x =>
-                        $"{x.ResourceType}|{x.MetricName}",
+                    metric =>
+                        $"{metric.ResourceType}|{metric.MetricName}",
                     StringComparer.OrdinalIgnoreCase)
                 .Select(
-                    x => x.First())
+                    group =>
+                        group.First())
                 .OrderBy(
-                    x => x.ResourceType)
+                    metric =>
+                        metric.ResourceType,
+                    StringComparer.OrdinalIgnoreCase)
                 .ThenBy(
-                    x => x.MetricName)
+                    metric =>
+                        metric.MetricName,
+                    StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
         foreach (var metric in
@@ -466,11 +530,11 @@ public sealed class AzureCollector
                 $"{metric.Unit}");
         }
 
-        Console.WriteLine();
-
         // -----------------------------------------------------
         // FIRST 20 METRIC PROFILES
         // -----------------------------------------------------
+
+        Console.WriteLine();
 
         Console.WriteLine(
             "PRIME 20 METRICHE RACCOLTE:");
