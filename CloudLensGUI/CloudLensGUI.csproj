@@ -1,13 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>.\assets\CloudLens.ico</ApplicationIcon>
   </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\CloudLens.Core\CloudLens.Core.csproj" />
-    <Resource Include="C:\Users\zdjpu\Documents\CloudLens\assets\CloudLens.ico" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="assets\CloudLens.ico" />
+  </ItemGroup>
+
 </Project>
