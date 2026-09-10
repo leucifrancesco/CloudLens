@@ -24,10 +24,6 @@ public sealed class CostAnalyzer : IAnalyzer
             resources,
             findings);
 
-        AnalyzeUnusedManagedDisks(
-            resources,
-            findings);
-
         return findings;
     }
 
@@ -41,7 +37,10 @@ public sealed class CostAnalyzer : IAnalyzer
     {
         var disks =
             resources.Where(
-                IsManagedDisk);
+                resource =>
+                    IsType(
+                        resource,
+                        "Microsoft.Compute/disks"));
 
         foreach (var resource in disks)
         {
@@ -86,25 +85,26 @@ public sealed class CostAnalyzer : IAnalyzer
                         Category.Cost,
 
                     Severity:
-                        Severity.High,
+                        Severity.Medium,
 
                     RuleId:
-                        "DISK-UNATTACHED",
+                        "COST-UNATTACHED-DISK",
 
                     Title:
-                        "Disco gestito non collegato",
+                        "Managed Disk non associato",
 
                     Description:
-                        $"Il disco '{resource.Name}' " +
-                        "non risulta collegato ad alcuna VM.",
+                        $"Il managed disk '{resource.Name}' " +
+                        "non risulta associato ad alcuna VM.",
 
                     Impact:
                         "Il disco può generare un costo ricorrente " +
                         "senza essere utilizzato.",
 
                     Recommendation:
-                        "Verificare il disco, conservarne uno snapshot " +
-                        "se necessario e quindi eliminarlo.",
+                        "Verificare se il disco è realmente inutilizzato. " +
+                        "Se non necessario, conservarne uno snapshot quando " +
+                        "richiesto e quindi procedere alla rimozione.",
 
                     ResourceName:
                         resource.Name,
@@ -113,8 +113,7 @@ public sealed class CostAnalyzer : IAnalyzer
                         resource.Type,
 
                     MonthlySavingEur:
-                        EstimateDiskSaving(
-                            properties.Value),
+                        0,
 
                     AzureCli:
                         $"az disk delete " +
@@ -135,7 +134,10 @@ public sealed class CostAnalyzer : IAnalyzer
     {
         var publicIps =
             resources.Where(
-                IsPublicIp);
+                resource =>
+                    IsType(
+                        resource,
+                        "Microsoft.Network/publicIPAddresses"));
 
         foreach (var resource in publicIps)
         {
@@ -168,20 +170,21 @@ public sealed class CostAnalyzer : IAnalyzer
                         Category.Cost,
 
                     Severity:
-                        Severity.Medium,
+                        Severity.Low,
 
                     RuleId:
-                        "PIP-ORPHAN",
+                        "COST-UNUSED-PIP",
 
                     Title:
-                        "Indirizzo IP pubblico non associato",
+                        "Public IP non utilizzata",
 
                     Description:
                         $"L'IP pubblico '{resource.Name}' " +
                         "non risulta associato ad alcuna risorsa.",
 
                     Impact:
-                        "Possibile costo ricorrente non necessario.",
+                        "Possibile costo ricorrente non necessario " +
+                        "e risorsa inutilizzata nell'ambiente.",
 
                     Recommendation:
                         "Verificare che l'IP non sia necessario " +
@@ -192,6 +195,9 @@ public sealed class CostAnalyzer : IAnalyzer
 
                     ResourceType:
                         resource.Type,
+
+                    MonthlySavingEur:
+                        0,
 
                     AzureCli:
                         $"az network public-ip delete " +
@@ -212,7 +218,10 @@ public sealed class CostAnalyzer : IAnalyzer
     {
         var publicIps =
             resources.Where(
-                IsPublicIp);
+                resource =>
+                    IsType(
+                        resource,
+                        "Microsoft.Network/publicIPAddresses"));
 
         foreach (var resource in publicIps)
         {
@@ -243,10 +252,10 @@ public sealed class CostAnalyzer : IAnalyzer
                         Category.Cost,
 
                     Severity:
-                        Severity.Medium,
+                        Severity.Low,
 
                     RuleId:
-                        "PIP-BASIC-SKU",
+                        "COST-PIP-BASIC-SKU",
 
                     Title:
                         "Public IP con SKU Basic",
@@ -257,12 +266,11 @@ public sealed class CostAnalyzer : IAnalyzer
 
                     Impact:
                         "Lo SKU Basic è una configurazione legacy " +
-                        "e può richiedere migrazione verso Standard " +
-                        "in base al servizio e all'architettura.",
+                        "e può richiedere migrazione verso Standard.",
 
                     Recommendation:
-                        "Verificare la compatibilità e pianificare " +
-                        "la migrazione a SKU Standard quando necessario.",
+                        "Verificare la compatibilità della configurazione " +
+                        "e pianificare la migrazione a SKU Standard quando necessario.",
 
                     ResourceName:
                         resource.Name,
@@ -270,86 +278,27 @@ public sealed class CostAnalyzer : IAnalyzer
                     ResourceType:
                         resource.Type,
 
+                    MonthlySavingEur:
+                        0,
+
                     ResourceId:
                         resource.Id));
         }
     }
 
     // =========================================================
-    // MANAGED DISK STATE
+    // HELPERS
     // =========================================================
 
-    private static void AnalyzeUnusedManagedDisks(
-        IReadOnlyList<AzureResource> resources,
-        List<Finding> findings)
-    {
-        /*
-         * DISK-UNATTACHED identifica già i managed disk
-         * non collegati.
-         *
-         * Manteniamo il metodo come punto di estensione
-         * per future regole specifiche sullo stato del disco.
-         */
-    }
-
-    // =========================================================
-    // COST ESTIMATION
-    // =========================================================
-
-    private static double EstimateDiskSaving(
-        JsonElement properties)
-    {
-        if (!properties.TryGetProperty(
-                "diskSizeGB",
-                out var sizeElement))
-        {
-            return 0;
-        }
-
-        if (!sizeElement.TryGetDouble(
-                out var sizeGb))
-        {
-            return 0;
-        }
-
-        if (sizeGb <= 0)
-        {
-            return 0;
-        }
-
-        const double estimatedEurPerGbMonth =
-            0.06;
-
-        return Math.Round(
-            sizeGb * estimatedEurPerGbMonth,
-            2);
-    }
-
-    // =========================================================
-    // RESOURCE HELPERS
-    // =========================================================
-
-    private static bool IsManagedDisk(
-        AzureResource resource)
+    private static bool IsType(
+        AzureResource resource,
+        string type)
     {
         return string.Equals(
             resource.Type,
-            "Microsoft.Compute/disks",
+            type,
             StringComparison.OrdinalIgnoreCase);
     }
-
-    private static bool IsPublicIp(
-        AzureResource resource)
-    {
-        return string.Equals(
-            resource.Type,
-            "Microsoft.Network/publicIPAddresses",
-            StringComparison.OrdinalIgnoreCase);
-    }
-
-    // =========================================================
-    // JSON HELPERS
-    // =========================================================
 
     private static string? GetString(
         JsonElement element,

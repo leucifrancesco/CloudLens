@@ -4,6 +4,9 @@ namespace CloudLens.Core.Analysis;
 
 public sealed class MetricAnalyzer
 {
+    private const int MinimumSamples =
+        24;
+
     public IEnumerable<Finding> Analyze(
         IReadOnlyList<AzureResource> resources,
         IReadOnlyList<MetricProfile> metrics,
@@ -53,6 +56,10 @@ public sealed class MetricAnalyzer
         return findings;
     }
 
+    // =========================================================
+    // VIRTUAL MACHINES
+    // =========================================================
+
     private static void AnalyzeVirtualMachines(
         IReadOnlyList<MetricProfile> metrics,
         List<Finding> findings)
@@ -76,7 +83,8 @@ public sealed class MetricAnalyzer
                     resourceMetrics,
                     "Percentage CPU");
 
-            if (cpu == null)
+            if (cpu == null ||
+                cpu.SampleCount < MinimumSamples)
             {
                 continue;
             }
@@ -101,22 +109,23 @@ public sealed class MetricAnalyzer
                             "VM con utilizzo CPU elevato",
 
                         description:
-                            $"La VM presenta una CPU media del {cpu.Average:F1}% " +
-                            $"nel periodo analizzato.",
+                            $"La VM presenta una CPU media del " +
+                            $"{cpu.Average:F1}% nel periodo analizzato " +
+                            $"su {cpu.SampleCount} campioni.",
 
                         impact:
                             "La VM potrebbe essere sottodimensionata " +
                             "o soggetta a carico elevato.",
 
                         recommendation:
-                            "Verificare il carico applicativo e valutare " +
-                            "il dimensionamento della VM.",
+                            "Verificare il carico applicativo, i picchi " +
+                            "e il dimensionamento della VM. Valutare " +
+                            "scaling o ridimensionamento se necessario.",
 
                         metric:
                             cpu));
             }
-            else if (cpu.Average <= 5 &&
-                     cpu.SampleCount >= 24)
+            else if (cpu.Average <= 5)
             {
                 findings.Add(
                     CreateFinding(
@@ -136,15 +145,17 @@ public sealed class MetricAnalyzer
                             "VM con utilizzo CPU molto basso",
 
                         description:
-                            $"La VM presenta una CPU media del {cpu.Average:F1}% " +
-                            $"nel periodo analizzato.",
+                            $"La VM presenta una CPU media del " +
+                            $"{cpu.Average:F1}% nel periodo analizzato " +
+                            $"su {cpu.SampleCount} campioni.",
 
                         impact:
                             "Il dimensionamento attuale potrebbe essere " +
                             "superiore alle esigenze del carico rilevato.",
 
                         recommendation:
-                            "Verificare i pattern di utilizzo e valutare " +
+                            "Verificare i pattern di utilizzo, i picchi " +
+                            "e i requisiti applicativi prima di valutare " +
                             "un eventuale ridimensionamento.",
 
                         metric:
@@ -152,6 +163,10 @@ public sealed class MetricAnalyzer
             }
         }
     }
+
+    // =========================================================
+    // APP SERVICES
+    // =========================================================
 
     private static void AnalyzeAppServices(
         IReadOnlyList<MetricProfile> metrics,
@@ -177,6 +192,7 @@ public sealed class MetricAnalyzer
                     "CpuTime");
 
             if (cpu != null &&
+                cpu.SampleCount >= MinimumSamples &&
                 cpu.Average > 90)
             {
                 findings.Add(
@@ -197,8 +213,9 @@ public sealed class MetricAnalyzer
                             "App Service con utilizzo CPU elevato",
 
                         description:
-                            "L'App Service presenta un utilizzo CPU elevato " +
-                            "nel periodo analizzato.",
+                            $"L'App Service presenta un utilizzo CPU " +
+                            $"elevato nel periodo analizzato " +
+                            $"su {cpu.SampleCount} campioni.",
 
                         impact:
                             "Il carico potrebbe causare degrado delle " +
@@ -218,6 +235,7 @@ public sealed class MetricAnalyzer
                     "Http5xx");
 
             if (errors != null &&
+                errors.SampleCount >= MinimumSamples &&
                 errors.Average > 0)
             {
                 findings.Add(
@@ -238,8 +256,9 @@ public sealed class MetricAnalyzer
                             "App Service con errori HTTP 5xx",
 
                         description:
-                            "Sono stati rilevati errori HTTP 5xx " +
-                            "nel periodo analizzato.",
+                            $"Sono stati rilevati errori HTTP 5xx " +
+                            $"nel periodo analizzato su " +
+                            $"{errors.SampleCount} campioni.",
 
                         impact:
                             "Gli errori 5xx indicano possibili problemi " +
@@ -254,6 +273,10 @@ public sealed class MetricAnalyzer
             }
         }
     }
+
+    // =========================================================
+    // SQL
+    // =========================================================
 
     private static void AnalyzeSqlDatabases(
         IReadOnlyList<MetricProfile> metrics,
@@ -289,6 +312,7 @@ public sealed class MetricAnalyzer
                     : cpu;
 
             if (utilization != null &&
+                utilization.SampleCount >= MinimumSamples &&
                 utilization.Average >= 90)
             {
                 findings.Add(
@@ -310,8 +334,9 @@ public sealed class MetricAnalyzer
 
                         description:
                             $"Il database presenta un utilizzo medio del " +
-                            $"{utilization.Average:F1}% " +
-                            $"per la metrica {utilization.MetricName}.",
+                            $"{utilization.Average:F1}% per la metrica " +
+                            $"{utilization.MetricName} su " +
+                            $"{utilization.SampleCount} campioni.",
 
                         impact:
                             "L'elevato utilizzo può causare degrado delle " +
@@ -331,6 +356,7 @@ public sealed class MetricAnalyzer
                     "storage_percent");
 
             if (storage != null &&
+                storage.SampleCount >= MinimumSamples &&
                 storage.Average >= 85)
             {
                 findings.Add(
@@ -352,7 +378,8 @@ public sealed class MetricAnalyzer
 
                         description:
                             $"Lo storage medio utilizzato è del " +
-                            $"{storage.Average:F1}%.",
+                            $"{storage.Average:F1}% su " +
+                            $"{storage.SampleCount} campioni.",
 
                         impact:
                             "La crescita dello storage può portare " +
@@ -367,6 +394,10 @@ public sealed class MetricAnalyzer
             }
         }
     }
+
+    // =========================================================
+    // STORAGE ACCOUNTS
+    // =========================================================
 
     private static void AnalyzeStorageAccounts(
         IReadOnlyList<MetricProfile> metrics,
@@ -392,6 +423,7 @@ public sealed class MetricAnalyzer
                     "Availability");
 
             if (availability != null &&
+                availability.SampleCount >= MinimumSamples &&
                 availability.Average < 99)
             {
                 findings.Add(
@@ -413,7 +445,8 @@ public sealed class MetricAnalyzer
 
                         description:
                             $"L'availability media rilevata è " +
-                            $"{availability.Average:F2}%.",
+                            $"{availability.Average:F2}% su " +
+                            $"{availability.SampleCount} campioni.",
 
                         impact:
                             "Una disponibilità ridotta può indicare " +
@@ -428,6 +461,10 @@ public sealed class MetricAnalyzer
             }
         }
     }
+
+    // =========================================================
+    // MESSAGING
+    // =========================================================
 
     private static void AnalyzeMessaging(
         IReadOnlyList<MetricProfile> metrics,
@@ -456,6 +493,7 @@ public sealed class MetricAnalyzer
                     "ThrottledRequests");
 
             if (throttled != null &&
+                throttled.SampleCount >= MinimumSamples &&
                 throttled.Maximum > 0)
             {
                 findings.Add(
@@ -477,6 +515,7 @@ public sealed class MetricAnalyzer
 
                         description:
                             $"Sono stati rilevati eventi di throttling " +
+                            $"su {throttled.SampleCount} campioni " +
                             $"per {throttled.MetricName}.",
 
                         impact:
@@ -492,6 +531,10 @@ public sealed class MetricAnalyzer
             }
         }
     }
+
+    // =========================================================
+    // HELPERS
+    // =========================================================
 
     private static MetricProfile? FindMetric(
         IEnumerable<MetricProfile> metrics,

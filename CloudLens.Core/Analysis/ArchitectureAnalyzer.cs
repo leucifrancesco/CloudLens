@@ -9,8 +9,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
-        var findings =
-            new List<Finding>();
+        var findings = new List<Finding>();
 
         AnalyzeVirtualMachines(
             resources,
@@ -32,19 +31,16 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
         return findings;
     }
 
-    // =========================================================
-    // VIRTUAL MACHINES
-    // =========================================================
-
     private static void AnalyzeVirtualMachines(
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var vms =
             resources.Where(
-                r => TypeEquals(
-                    r,
-                    "Microsoft.Compute/virtualMachines"));
+                resource =>
+                    TypeEquals(
+                        resource,
+                        "Microsoft.Compute/virtualMachines"));
 
         foreach (var vm in vms)
         {
@@ -111,19 +107,16 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
         }
     }
 
-    // =========================================================
-    // VM SCALE SETS
-    // =========================================================
-
     private static void AnalyzeVirtualMachineScaleSets(
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var scaleSets =
             resources.Where(
-                r => TypeEquals(
-                    r,
-                    "Microsoft.Compute/virtualMachineScaleSets"));
+                resource =>
+                    TypeEquals(
+                        resource,
+                        "Microsoft.Compute/virtualMachineScaleSets"));
 
         foreach (var scaleSet in scaleSets)
         {
@@ -142,7 +135,8 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
 
             var hasAvailabilityZone =
                 zones.HasValue &&
-                zones.Value.ValueKind == JsonValueKind.Array &&
+                zones.Value.ValueKind ==
+                    JsonValueKind.Array &&
                 zones.Value.GetArrayLength() > 0;
 
             if (!hasAvailabilityZone)
@@ -250,19 +244,16 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
         }
     }
 
-    // =========================================================
-    // STORAGE REPLICATION
-    // =========================================================
-
     private static void AnalyzeStorageReplication(
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var storageAccounts =
             resources.Where(
-                r => TypeEquals(
-                    r,
-                    "Microsoft.Storage/storageAccounts"));
+                resource =>
+                    TypeEquals(
+                        resource,
+                        "Microsoft.Storage/storageAccounts"));
 
         foreach (var storage in storageAccounts)
         {
@@ -283,83 +274,19 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
             var skuName =
                 skuNameElement.GetString();
 
-            if (string.IsNullOrWhiteSpace(skuName))
+            if (string.IsNullOrWhiteSpace(
+                    skuName))
             {
                 continue;
             }
 
-            if (skuName.Contains(
+            if (!skuName.Contains(
                     "LRS",
                     StringComparison.OrdinalIgnoreCase))
             {
-                findings.Add(
-                    new Finding(
-                        Id:
-                            Guid.NewGuid().ToString(),
-
-                        Category:
-                            Category.Reliability,
-
-                        Severity:
-                            Severity.Low,
-
-                        RuleId:
-                            "ST-LRS-REPLICATION",
-
-                        Title:
-                            "Storage Account con replica LRS",
-
-                        Description:
-                            $"Lo storage account '{storage.Name}' " +
-                            "utilizza una replica LRS.",
-
-                        Impact:
-                            "LRS offre una resilienza inferiore rispetto " +
-                            "a configurazioni con ridondanza geografica " +
-                            "o zonale.",
-
-                        Recommendation:
-                            "Valutare ZRS, GRS o GZRS in funzione dei " +
-                            "requisiti di disponibilità e disaster recovery.",
-
-                        ResourceName:
-                            storage.Name,
-
-                        ResourceType:
-                            storage.Type,
-
-                        ResourceId:
-                            storage.Id));
+                continue;
             }
-        }
-    }
 
-    // =========================================================
-    // BASIC ARCHITECTURE
-    // =========================================================
-
-    private static void AnalyzeBasicResourceDistribution(
-        IReadOnlyList<AzureResource> resources,
-        AzureSubscription subscription,
-        List<Finding> findings)
-    {
-        var locations =
-            resources
-                .Select(
-                    r => r.Location)
-                .Where(
-                    x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(
-                    StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-        if (resources.Count == 0)
-        {
-            return;
-        }
-
-        if (locations.Count == 1)
-        {
             findings.Add(
                 new Finding(
                     Id:
@@ -372,37 +299,99 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                         Severity.Low,
 
                     RuleId:
-                        "ARCH-SINGLE-REGION",
+                        "ST-LRS-REPLICATION",
 
                     Title:
-                        "Ambiente distribuito in una sola region",
+                        "Storage Account con replica LRS",
 
                     Description:
-                        $"Le risorse analizzate risultano concentrate " +
-                        $"nella region '{locations[0]}'.",
+                        $"Lo Storage Account '{storage.Name}' " +
+                        "utilizza una replica LRS.",
 
                     Impact:
-                        "Un singolo failure domain geografico può " +
-                        "aumentare il rischio di indisponibilità.",
+                        "LRS offre una resilienza inferiore rispetto " +
+                        "a configurazioni con ridondanza zonale o geografica.",
 
                     Recommendation:
-                        "Valutare una strategia multi-region quando " +
-                        "i requisiti applicativi lo rendono necessario.",
+                        "Valutare ZRS, GRS o GZRS in funzione dei " +
+                        "requisiti di disponibilità e disaster recovery.",
 
                     ResourceName:
-                        subscription.Name,
+                        storage.Name,
 
                     ResourceType:
-                        "Microsoft.Resources/subscriptions",
+                        storage.Type,
 
                     ResourceId:
-                        subscription.Id));
+                        storage.Id));
         }
     }
 
-    // =========================================================
-    // HELPERS
-    // =========================================================
+    private static void AnalyzeBasicResourceDistribution(
+        IReadOnlyList<AzureResource> resources,
+        AzureSubscription subscription,
+        List<Finding> findings)
+    {
+        if (resources.Count == 0)
+        {
+            return;
+        }
+
+        var locations =
+            resources
+                .Select(
+                    resource =>
+                        resource.Location)
+                .Where(
+                    location =>
+                        !string.IsNullOrWhiteSpace(location))
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        if (locations.Count != 1)
+        {
+            return;
+        }
+
+        findings.Add(
+            new Finding(
+                Id:
+                    Guid.NewGuid().ToString(),
+
+                Category:
+                    Category.Reliability,
+
+                Severity:
+                    Severity.Low,
+
+                RuleId:
+                    "ARCH-SINGLE-REGION",
+
+                Title:
+                    "Ambiente distribuito in una sola region",
+
+                Description:
+                    $"Le risorse analizzate risultano concentrate " +
+                    $"nella region '{locations[0]}'.",
+
+                Impact:
+                    "Un singolo failure domain geografico può " +
+                    "aumentare il rischio di indisponibilità.",
+
+                Recommendation:
+                    "Valutare una strategia multi-region quando " +
+                    "i requisiti applicativi lo rendono necessario.",
+
+                ResourceName:
+                    subscription.Name,
+
+                ResourceType:
+                    "Microsoft.Resources/subscriptions",
+
+                ResourceId:
+                    subscription.Id));
+    }
 
     private static bool HasAvailabilityZone(
         JsonElement properties)
@@ -413,7 +402,8 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                 "zones");
 
         return zones.HasValue &&
-               zones.Value.ValueKind == JsonValueKind.Array &&
+               zones.Value.ValueKind ==
+                   JsonValueKind.Array &&
                zones.Value.GetArrayLength() > 0;
     }
 
@@ -440,7 +430,8 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
             return false;
         }
 
-        return id.ValueKind == JsonValueKind.String &&
+        return id.ValueKind ==
+                   JsonValueKind.String &&
                !string.IsNullOrWhiteSpace(
                    id.GetString());
     }

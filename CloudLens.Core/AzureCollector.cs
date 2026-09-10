@@ -22,7 +22,8 @@ public sealed class AzureCollector
                 new SecurityAnalyzer(),
                 new CostAnalyzer(),
                 new OperationsAnalyzer(),
-                new ArchitectureAnalyzer()
+                new ArchitectureAnalyzer(),
+                new CorrelationAnalyzer()
             ]);
     }
 

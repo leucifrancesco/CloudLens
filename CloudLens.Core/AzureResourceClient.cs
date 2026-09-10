@@ -16,6 +16,7 @@ public sealed class AzureResourceClient
         "2024-04-01";
 
     private readonly HttpClient _http;
+
     private readonly string _token;
 
     public AzureResourceClient(
@@ -44,6 +45,9 @@ public sealed class AzureResourceClient
         GetSubscriptionsAsync(
             CancellationToken cancellationToken = default)
     {
+        var subscriptions =
+            new List<AzureSubscription>();
+
         var url =
             $"{ArmBase}/subscriptions" +
             "?api-version=2022-12-01";
@@ -58,89 +62,62 @@ public sealed class AzureResourceClient
                 request,
                 cancellationToken);
 
-        if (!response.IsSuccessStatusCode)
-        {
-            var body =
-                await response.Content.ReadAsStringAsync(
-                    cancellationToken);
-
-            throw new HttpRequestException(
-                $"Errore durante il recupero delle " +
-                $"subscription Azure. " +
-                $"HTTP {(int)response.StatusCode} " +
-                $"{response.ReasonPhrase}. " +
-                $"Response: {body}");
-        }
-
-        var json =
+        var content =
             await response.Content.ReadAsStringAsync(
                 cancellationToken);
 
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"Errore Azure Subscription API. " +
+                $"HTTP {(int)response.StatusCode} " +
+                $"{response.StatusCode}. " +
+                $"Response: {content}");
+        }
+
         using var document =
-            JsonDocument.Parse(json);
+            JsonDocument.Parse(content);
 
         if (!document.RootElement.TryGetProperty(
                 "value",
                 out var values) ||
             values.ValueKind != JsonValueKind.Array)
         {
-            return [];
+            return subscriptions;
         }
 
-        var subscriptions =
-            new List<AzureSubscription>();
-
-        foreach (var item in
-                 values.EnumerateArray())
+        foreach (var item in values.EnumerateArray())
         {
             var id =
                 GetString(
                     item,
-                    "id");
+                    "subscriptionId");
+
+            var name =
+                GetString(
+                    item,
+                    "displayName");
 
             if (string.IsNullOrWhiteSpace(id))
             {
                 continue;
             }
 
-            var name =
-                GetString(
-                    item,
-                    "displayName")
-                ?? id;
-
-            var state =
-                GetString(
-                    item,
-                    "state");
-
-            if (!string.Equals(
-                    state,
-                    "Enabled",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
             subscriptions.Add(
                 new AzureSubscription(
-                    Id: id,
-                    Name: name));
+                    id,
+                    name ?? id));
         }
 
-        return subscriptions
-            .OrderBy(
-                x => x.Name,
-                StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return subscriptions;
     }
 
     // =========================================================
     // RESOURCE DISCOVERY
     // =========================================================
 
-    public async Task<List<JsonElement>>
-        GetResourcesAsync(
+    public async Task<List<AzureResource>>
+        GetAzureResourcesAsync(
             string subscriptionId,
             CancellationToken cancellationToken = default)
     {
@@ -151,73 +128,53 @@ public sealed class AzureResourceClient
                 nameof(subscriptionId));
         }
 
-        // -----------------------------------------------------
-        // Azure Resource Graph richiede il GUID puro.
-        //
-        // Azure ARM invece normalmente restituisce:
-        //
-        // /subscriptions/{GUID}
-        //
-        // Normalizziamo quindi il valore prima di inviarlo
-        // a Resource Graph.
-        // -----------------------------------------------------
-
-        var normalizedSubscriptionId =
-            NormalizeSubscriptionId(
-                subscriptionId);
-
-        if (!Guid.TryParse(
-                normalizedSubscriptionId,
-                out _))
-        {
-            throw new ArgumentException(
-                $"Subscription ID non valido: " +
-                $"{subscriptionId}",
-                nameof(subscriptionId));
-        }
-
         var resources =
-            new List<JsonElement>();
+            new List<AzureResource>();
 
-        var skipToken =
-            string.Empty;
+        string? skipToken = null;
 
         do
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
             var query =
-                BuildResourceQuery(
-                    normalizedSubscriptionId);
+                BuildResourceQuery();
 
-            var requestBody =
+            var payload =
                 new Dictionary<string, object?>
                 {
                     ["subscriptions"] =
                         new[]
                         {
-                            normalizedSubscriptionId
+                            subscriptionId
                         },
 
                     ["query"] =
                         query,
 
                     ["options"] =
-                        new
+                        new Dictionary<string, object?>
                         {
-                            resultFormat = "objectArray",
-
-                            skipToken =
-                                string.IsNullOrWhiteSpace(
-                                    skipToken)
-                                    ? null
-                                    : skipToken
+                            ["resultFormat"] =
+                                "objectArray"
                         }
                 };
 
-            var jsonBody =
+            if (!string.IsNullOrWhiteSpace(
+                    skipToken))
+            {
+                payload["options"] =
+                    new Dictionary<string, object?>
+                    {
+                        ["resultFormat"] =
+                            "objectArray",
+
+                        ["$skipToken"] =
+                            skipToken
+                    };
+            }
+
+            var json =
                 JsonSerializer.Serialize(
-                    requestBody);
+                    payload);
 
             using var request =
                 CreateRequest(
@@ -227,7 +184,7 @@ public sealed class AzureResourceClient
 
             request.Content =
                 new StringContent(
-                    jsonBody,
+                    json,
                     Encoding.UTF8,
                     "application/json");
 
@@ -236,38 +193,45 @@ public sealed class AzureResourceClient
                     request,
                     cancellationToken);
 
-            if (!response.IsSuccessStatusCode)
-            {
-                var body =
-                    await response.Content.ReadAsStringAsync(
-                        cancellationToken);
-
-                throw new HttpRequestException(
-                    $"Errore Azure Resource Graph. " +
-                    $"HTTP {(int)response.StatusCode} " +
-                    $"{response.ReasonPhrase}. " +
-                    $"Response: {body}");
-            }
-
-            var responseBody =
+            var content =
                 await response.Content.ReadAsStringAsync(
                     cancellationToken);
 
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine(
+                    $"Errore Azure Resource Graph. " +
+                    $"HTTP {(int)response.StatusCode} " +
+                    $"{response.StatusCode}.");
+
+                Console.WriteLine(
+                    $"Response: {content}");
+
+                throw new HttpRequestException(
+                    $"Azure Resource Graph ha restituito " +
+                    $"HTTP {(int)response.StatusCode}.");
+            }
+
             using var document =
-                JsonDocument.Parse(
-                    responseBody);
+                JsonDocument.Parse(content);
 
             if (document.RootElement.TryGetProperty(
                     "data",
                     out var data) &&
-                data.ValueKind ==
-                    JsonValueKind.Array)
+                data.ValueKind == JsonValueKind.Array)
             {
-                foreach (var resource in
+                foreach (var item in
                          data.EnumerateArray())
                 {
-                    resources.Add(
-                        resource.Clone());
+                    var resource =
+                        CreateResource(
+                            item);
+
+                    if (resource != null)
+                    {
+                        resources.Add(
+                            resource);
+                    }
                 }
             }
 
@@ -275,95 +239,199 @@ public sealed class AzureResourceClient
                 document.RootElement.TryGetProperty(
                     "$skipToken",
                     out var tokenElement)
-                &&
-                tokenElement.ValueKind ==
-                    JsonValueKind.String
-                    ? tokenElement.GetString() ?? ""
-                    : "";
+                    ? tokenElement.GetString()
+                    : null;
 
-        }
-        while (!string.IsNullOrWhiteSpace(skipToken));
+        } while (!string.IsNullOrWhiteSpace(
+            skipToken));
 
         return resources;
     }
 
     // =========================================================
-    // NORMALIZED RESOURCE DISCOVERY
+    // RESOURCE GRAPH QUERY
     // =========================================================
 
-    public async Task<List<AzureResource>>
-        GetAzureResourcesAsync(
-            string subscriptionId,
-            CancellationToken cancellationToken = default)
-    {
-        var rawResources =
-            await GetResourcesAsync(
-                subscriptionId,
-                cancellationToken);
-
-        var resources =
-            new List<AzureResource>();
-
-        foreach (var raw in rawResources)
-        {
-            if (AzureResource.TryCreate(
-                    raw,
-                    out var resource) &&
-                resource != null)
-            {
-                resources.Add(
-                    resource);
-            }
-        }
-
-        return resources;
-    }
-
-    // =========================================================
-    // RESOURCE QUERY
-    // =========================================================
-
-    private static string BuildResourceQuery(
-        string subscriptionId)
+    private static string BuildResourceQuery()
     {
         return """
-            Resources
-            | project
-                id,
-                name,
-                type,
-                resourceGroup,
-                location,
-                subscriptionId,
-                tags,
-                sku,
-                properties
-            | order by type asc, name asc
-            """;
+Resources
+| extend resourceIdLower = tolower(id)
+| join kind=leftouter (
+    RecoveryServicesResources
+    | where type =~ 'Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems'
+    | where properties.backupManagementType =~ 'AzureIaasVM'
+    | where isnotempty(properties.sourceResourceId)
+    | project
+        backupResourceId =
+            tolower(tostring(properties.sourceResourceId)),
+        backupProtected = true
+) on $left.resourceIdLower == $right.backupResourceId
+| extend
+    backupProtectedValue =
+        coalesce(backupProtected, false)
+| project
+    id,
+    name,
+    type,
+    resourceGroup,
+    location,
+    subscriptionId,
+    tags,
+    sku,
+    properties,
+    backupProtectedValue
+| order by type asc, name asc
+""";
     }
 
     // =========================================================
-    // SUBSCRIPTION ID NORMALIZATION
+    // RESOURCE CREATION
     // =========================================================
 
-    private static string NormalizeSubscriptionId(
-        string subscriptionId)
+    private static AzureResource? CreateResource(
+        JsonElement item)
     {
-        var value =
-            subscriptionId.Trim();
+        var id =
+            GetString(
+                item,
+                "id");
 
-        const string prefix =
-            "/subscriptions/";
+        var name =
+            GetString(
+                item,
+                "name");
 
-        if (value.StartsWith(
-                prefix,
-                StringComparison.OrdinalIgnoreCase))
+        var type =
+            GetString(
+                item,
+                "type");
+
+        if (string.IsNullOrWhiteSpace(id) ||
+            string.IsNullOrWhiteSpace(name) ||
+            string.IsNullOrWhiteSpace(type))
         {
-            value =
-                value[prefix.Length..];
+            return null;
         }
 
-        return value.Trim('/');
+        var resourceGroup =
+            GetString(
+                item,
+                "resourceGroup") ??
+            string.Empty;
+
+        var location =
+            GetString(
+                item,
+                "location") ??
+            string.Empty;
+
+        var subscriptionId =
+            GetString(
+                item,
+                "subscriptionId") ??
+            NormalizeSubscriptionId(
+                id);
+
+        var tags =
+            ReadTags(
+                item);
+
+        JsonElement? sku =
+            null;
+
+        if (item.TryGetProperty(
+                "sku",
+                out var skuElement) &&
+            skuElement.ValueKind ==
+                JsonValueKind.Object)
+        {
+            sku =
+                skuElement.Clone();
+        }
+
+        var properties =
+            BuildProperties(
+                item);
+
+        return new AzureResource(
+            id,
+            name,
+            type,
+            resourceGroup,
+            location,
+            subscriptionId,
+            tags,
+            sku,
+            properties,
+            item.Clone());
+    }
+
+    private static JsonElement?
+        BuildProperties(
+            JsonElement item)
+    {
+        JsonElement properties;
+
+        if (item.TryGetProperty(
+                "properties",
+                out var propertiesElement) &&
+            propertiesElement.ValueKind ==
+                JsonValueKind.Object)
+        {
+            properties =
+                propertiesElement.Clone();
+        }
+        else
+        {
+            using var emptyDocument =
+                JsonDocument.Parse("{}");
+
+            properties =
+                emptyDocument.RootElement.Clone();
+        }
+
+        var backupProtected =
+            false;
+
+        if (item.TryGetProperty(
+                "backupProtectedValue",
+                out var backupElement))
+        {
+            backupProtected =
+                backupElement.ValueKind ==
+                JsonValueKind.True;
+        }
+
+        using var stream =
+            new MemoryStream();
+
+        using (
+            var writer =
+                new Utf8JsonWriter(
+                    stream))
+        {
+            writer.WriteStartObject();
+
+            foreach (var property in
+                     properties.EnumerateObject())
+            {
+                property.WriteTo(
+                    writer);
+            }
+
+            writer.WriteBoolean(
+                "cloudLensBackupProtected",
+                backupProtected);
+
+            writer.WriteEndObject();
+        }
+
+        using var document =
+            JsonDocument.Parse(
+                stream.ToArray());
+
+        return document.RootElement.Clone();
     }
 
     // =========================================================
@@ -392,8 +460,32 @@ public sealed class AzureResourceClient
     }
 
     // =========================================================
-    // JSON HELPERS
+    // HELPERS
     // =========================================================
+
+    private static string NormalizeSubscriptionId(
+        string resourceId)
+    {
+        var parts =
+            resourceId.Split(
+                '/',
+                StringSplitOptions.RemoveEmptyEntries);
+
+        for (var index = 0;
+             index < parts.Length - 1;
+             index++)
+        {
+            if (string.Equals(
+                    parts[index],
+                    "subscriptions",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return parts[index + 1];
+            }
+        }
+
+        return string.Empty;
+    }
 
     private static string? GetString(
         JsonElement element,
@@ -401,14 +493,50 @@ public sealed class AzureResourceClient
     {
         if (!element.TryGetProperty(
                 property,
-                out var value))
+                out var value) ||
+            value.ValueKind !=
+                JsonValueKind.String)
         {
             return null;
         }
 
-        return value.ValueKind ==
-               JsonValueKind.String
-            ? value.GetString()
-            : value.ToString();
+        return value.GetString();
+    }
+
+    private static IReadOnlyDictionary<string, string>
+        ReadTags(
+            JsonElement item)
+    {
+        var result =
+            new Dictionary<string, string>(
+                StringComparer.OrdinalIgnoreCase);
+
+        if (!item.TryGetProperty(
+                "tags",
+                out var tags) ||
+            tags.ValueKind !=
+                JsonValueKind.Object)
+        {
+            return result;
+        }
+
+        foreach (var property in
+                 tags.EnumerateObject())
+        {
+            if (property.Value.ValueKind ==
+                JsonValueKind.String)
+            {
+                result[property.Name] =
+                    property.Value.GetString() ??
+                    string.Empty;
+            }
+            else
+            {
+                result[property.Name] =
+                    property.Value.GetRawText();
+            }
+        }
+
+        return result;
     }
 }
