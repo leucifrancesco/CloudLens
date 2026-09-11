@@ -34,7 +34,8 @@ public sealed class AzureMonitorClient
         string token)
     {
         _http =
-            http ?? throw new ArgumentNullException(
+            http ??
+            throw new ArgumentNullException(
                 nameof(http));
 
         if (string.IsNullOrWhiteSpace(token))
@@ -51,13 +52,29 @@ public sealed class AzureMonitorClient
         IReadOnlyList<JsonElement> resources,
         CancellationToken cancellationToken = default)
     {
-        var result =
-            new ConcurrentBag<MetricProfile>();
+        var collection =
+            await GetMetricCollectionAsync(
+                resources,
+                cancellationToken);
 
+        return collection.Profiles.ToList();
+    }
+
+    public async Task<MetricCollectionResult>
+        GetMetricCollectionAsync(
+            IReadOnlyList<JsonElement> resources,
+            CancellationToken cancellationToken = default)
+    {
         if (resources.Count == 0)
         {
-            return [];
+            return new MetricCollectionResult();
         }
+
+        var profiles =
+            new ConcurrentBag<MetricProfile>();
+
+        var coverage =
+            new ConcurrentBag<MetricResourceCoverage>();
 
         using var semaphore =
             new SemaphoreSlim(
@@ -69,22 +86,34 @@ public sealed class AzureMonitorClient
                 resource =>
                     CollectResourceMetricsAsync(
                         resource,
-                        result,
+                        profiles,
+                        coverage,
                         semaphore,
                         cancellationToken));
 
         await Task.WhenAll(tasks);
 
-        return result
-            .OrderBy(x => x.ResourceType)
-            .ThenBy(x => x.ResourceName)
-            .ThenBy(x => x.MetricName)
-            .ToList();
+        return new MetricCollectionResult
+        {
+            Profiles =
+                profiles
+                    .OrderBy(x => x.ResourceType)
+                    .ThenBy(x => x.ResourceName)
+                    .ThenBy(x => x.MetricName)
+                    .ToList(),
+
+            Resources =
+                coverage
+                    .OrderBy(x => x.ResourceType)
+                    .ThenBy(x => x.ResourceName)
+                    .ToList()
+        };
     }
 
     private async Task CollectResourceMetricsAsync(
         JsonElement resource,
-        ConcurrentBag<MetricProfile> result,
+        ConcurrentBag<MetricProfile> profiles,
+        ConcurrentBag<MetricResourceCoverage> coverage,
         SemaphoreSlim semaphore,
         CancellationToken cancellationToken)
     {
@@ -104,90 +133,114 @@ public sealed class AzureMonitorClient
         var resourceType =
             GetString(
                 resource,
-                "type");
+                "type")
+            ?? "Unknown";
 
-        if (string.IsNullOrWhiteSpace(resourceId) ||
-            string.IsNullOrWhiteSpace(resourceType))
+        if (string.IsNullOrWhiteSpace(resourceId))
         {
             return;
         }
 
-        var metricNames =
-            GetRelevantMetricNames(
-                resourceType);
-
-        if (metricNames.Count == 0)
-        {
-            return;
-        }
+        await semaphore.WaitAsync(
+            cancellationToken);
 
         try
         {
-            await semaphore.WaitAsync(
-                cancellationToken);
+            List<MetricDefinition> definitions;
 
             try
             {
-                var definitions =
+                definitions =
                     await GetMetricDefinitionsAsync(
                         resourceId,
                         cancellationToken);
-
-                if (definitions.Count == 0)
-                {
-                    return;
-                }
-
-                var selectedDefinitions =
-                    definitions
-                        .Where(
-                            definition =>
-                                metricNames.Contains(
-                                    definition.Name,
-                                    StringComparer.OrdinalIgnoreCase))
-                        .ToList();
-
-                foreach (var definition in
-                         selectedDefinitions)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    try
-                    {
-                        var profiles =
-                            await GetMetricAsync(
-                                resourceId,
-                                resourceName,
-                                resourceType,
-                                definition,
-                                DefaultLookbackDays,
-                                cancellationToken);
-
-                        foreach (var profile in profiles)
-                        {
-                            result.Add(profile);
-                        }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch
-                    {
-                    }
-                }
             }
-            finally
+            catch (OperationCanceledException)
             {
-                semaphore.Release();
+                throw;
             }
+            catch (Exception ex)
+            {
+                coverage.Add(
+                    new MetricResourceCoverage(
+                        resourceId,
+                        resourceName,
+                        resourceType,
+                        0,
+                        0,
+                        MetricCoverageStatus.Error,
+                        ex.Message));
+
+                return;
+            }
+
+            if (definitions.Count == 0)
+            {
+                coverage.Add(
+                    new MetricResourceCoverage(
+                        resourceId,
+                        resourceName,
+                        resourceType,
+                        0,
+                        0,
+                        MetricCoverageStatus.Unsupported,
+                        "Nessuna metric definition disponibile per la risorsa."));
+
+                return;
+            }
+
+            var collectedMetrics = 0;
+
+            foreach (var definition in definitions)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    var metricProfiles =
+                        await GetMetricAsync(
+                            resourceId,
+                            resourceName,
+                            resourceType,
+                            definition,
+                            DefaultLookbackDays,
+                            cancellationToken);
+
+                    foreach (var profile in metricProfiles)
+                    {
+                        profiles.Add(profile);
+                        collectedMetrics++;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Una singola metrica non deve
+                    // compromettere l'intera scansione.
+                }
+            }
+
+            var status =
+                collectedMetrics > 0
+                    ? MetricCoverageStatus.Collected
+                    : MetricCoverageStatus.NoData;
+
+            coverage.Add(
+                new MetricResourceCoverage(
+                    resourceId,
+                    resourceName,
+                    resourceType,
+                    definitions.Count,
+                    collectedMetrics,
+                    status,
+                    null));
         }
-        catch (OperationCanceledException)
+        finally
         {
-            throw;
-        }
-        catch
-        {
+            semaphore.Release();
         }
     }
 
@@ -201,106 +254,97 @@ public sealed class AzureMonitorClient
             "/providers/Microsoft.Insights/metricDefinitions" +
             $"?api-version={MetricDefinitionsApiVersion}";
 
-        try
-        {
-            using var request =
-                CreateRequest(
-                    HttpMethod.Get,
-                    url);
+        using var request =
+            CreateRequest(
+                HttpMethod.Get,
+                url);
 
-            using var response =
-                await _http.SendAsync(
-                    request,
-                    cancellationToken);
+        using var response =
+            await _http.SendAsync(
+                request,
+                cancellationToken);
 
-            if (!response.IsSuccessStatusCode)
-            {
-                return [];
-            }
-
-            var body =
-                await response.Content.ReadAsStringAsync(
-                    cancellationToken);
-
-            using var json =
-                JsonDocument.Parse(body);
-
-            if (!json.RootElement.TryGetProperty(
-                    "value",
-                    out var values) ||
-                values.ValueKind !=
-                    JsonValueKind.Array)
-            {
-                return [];
-            }
-
-            var result =
-                new List<MetricDefinition>();
-
-            foreach (var item in
-                     values.EnumerateArray())
-            {
-                var name =
-                    GetString(
-                        item,
-                        "name",
-                        "value");
-
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    continue;
-                }
-
-                var displayName =
-                    GetString(
-                        item,
-                        "name",
-                        "localizedValue")
-                    ?? name;
-
-                var unit =
-                    GetString(
-                        item,
-                        "unit");
-
-                var namespaceName =
-                    GetString(
-                        item,
-                        "namespace");
-
-                result.Add(
-                    new MetricDefinition(
-                        name,
-                        displayName,
-                        unit,
-                        namespaceName));
-            }
-
-            return result;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
+        if (!response.IsSuccessStatusCode)
         {
             return [];
         }
+
+        var body =
+            await response.Content.ReadAsStringAsync(
+                cancellationToken);
+
+        using var json =
+            JsonDocument.Parse(body);
+
+        if (!json.RootElement.TryGetProperty(
+                "value",
+                out var values) ||
+            values.ValueKind !=
+            JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var result =
+            new List<MetricDefinition>();
+
+        foreach (var item in
+                 values.EnumerateArray())
+        {
+            var name =
+                GetString(
+                    item,
+                    "name",
+                    "value");
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            var displayName =
+                GetString(
+                    item,
+                    "name",
+                    "localizedValue")
+                ?? name;
+
+            var unit =
+                GetString(
+                    item,
+                    "unit");
+
+            var namespaceName =
+                GetString(
+                    item,
+                    "namespace");
+
+            result.Add(
+                new MetricDefinition(
+                    name,
+                    displayName,
+                    unit,
+                    namespaceName));
+        }
+
+        return result;
     }
 
-    private async Task<List<MetricProfile>> GetMetricAsync(
-        string resourceId,
-        string resourceName,
-        string resourceType,
-        MetricDefinition definition,
-        int lookbackDays,
-        CancellationToken cancellationToken)
+    private async Task<List<MetricProfile>>
+        GetMetricAsync(
+            string resourceId,
+            string resourceName,
+            string resourceType,
+            MetricDefinition definition,
+            int lookbackDays,
+            CancellationToken cancellationToken)
     {
         var endTime =
             DateTimeOffset.UtcNow;
 
         var startTime =
-            endTime.AddDays(-lookbackDays);
+            endTime.AddDays(
+                -lookbackDays);
 
         var url =
             $"{ArmBase}{resourceId}" +
@@ -340,7 +384,7 @@ public sealed class AzureMonitorClient
                 "value",
                 out var values) ||
             values.ValueKind !=
-                JsonValueKind.Array)
+            JsonValueKind.Array)
         {
             return [];
         }
@@ -381,7 +425,7 @@ public sealed class AzureMonitorClient
                     "timeseries",
                     out var timeseries) ||
                 timeseries.ValueKind !=
-                    JsonValueKind.Array)
+                JsonValueKind.Array)
             {
                 continue;
             }
@@ -393,7 +437,7 @@ public sealed class AzureMonitorClient
                         "data",
                         out var data) ||
                     data.ValueKind !=
-                        JsonValueKind.Array)
+                    JsonValueKind.Array)
                 {
                     continue;
                 }
@@ -502,76 +546,6 @@ public sealed class AzureMonitorClient
         return result;
     }
 
-    private static IReadOnlyList<string>
-        GetRelevantMetricNames(
-            string resourceType)
-    {
-        if (string.IsNullOrWhiteSpace(resourceType))
-        {
-            return [];
-        }
-
-        return resourceType.ToLowerInvariant() switch
-        {
-            "microsoft.compute/virtualmachines" =>
-                [
-                    "Percentage CPU",
-                    "Disk Read Bytes",
-                    "Disk Write Bytes",
-                    "Network In Total",
-                    "Network Out Total"
-                ],
-
-            "microsoft.web/sites" =>
-                [
-                    "CpuTime",
-                    "MemoryWorkingSet",
-                    "Requests",
-                    "Http5xx",
-                    "AverageResponseTime"
-                ],
-
-            "microsoft.sql/servers/databases" =>
-                [
-                    "dtu_consumption_percent",
-                    "cpu_percent",
-                    "storage_percent",
-                    "connection_successful",
-                    "connection_failed"
-                ],
-
-            "microsoft.storage/storageaccounts" =>
-                [
-                    "UsedCapacity",
-                    "Transactions",
-                    "Ingress",
-                    "Egress",
-                    "Availability"
-                ],
-
-            "microsoft.servicebus/namespaces" =>
-                [
-                    "IncomingMessages",
-                    "OutgoingMessages",
-                    "IncomingRequests",
-                    "OutgoingRequests",
-                    "ThrottledRequests"
-                ],
-
-            "microsoft.eventhub/namespaces" =>
-                [
-                    "IncomingMessages",
-                    "OutgoingMessages",
-                    "IncomingBytes",
-                    "OutgoingBytes",
-                    "ThrottledRequests"
-                ],
-
-            _ =>
-                []
-        };
-    }
-
     private HttpRequestMessage CreateRequest(
         HttpMethod method,
         string url)
@@ -628,7 +602,7 @@ public sealed class AzureMonitorClient
                 property,
                 out var value)
             && value.ValueKind ==
-                JsonValueKind.String
+               JsonValueKind.String
                 ? value.GetString()
                 : null;
     }
@@ -663,4 +637,30 @@ public sealed class AzureMonitorClient
         string DisplayName,
         string? Unit,
         string? Namespace);
+}
+
+public enum MetricCoverageStatus
+{
+    Collected,
+    NoData,
+    Unsupported,
+    Error
+}
+
+public sealed record MetricResourceCoverage(
+    string ResourceId,
+    string ResourceName,
+    string ResourceType,
+    int AvailableMetricDefinitions,
+    int CollectedMetricProfiles,
+    MetricCoverageStatus Status,
+    string? Error);
+
+public sealed class MetricCollectionResult
+{
+    public IReadOnlyList<MetricProfile> Profiles { get; init; }
+        = [];
+
+    public IReadOnlyList<MetricResourceCoverage> Resources { get; init; }
+        = [];
 }

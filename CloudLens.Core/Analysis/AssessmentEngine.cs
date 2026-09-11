@@ -12,12 +12,24 @@ public sealed class AssessmentEngine
     {
         if (analyzers == null)
         {
-            throw new ArgumentNullException(nameof(analyzers));
+            throw new ArgumentNullException(
+                nameof(analyzers));
         }
 
-        _analyzers = analyzers
-            .Where(analyzer => analyzer != null)
-            .ToList();
+        var registered =
+            analyzers
+                .Where(analyzer => analyzer != null)
+                .ToList();
+
+        if (!registered.Any(
+                analyzer =>
+                    analyzer is ServiceConfigurationAnalyzer))
+        {
+            registered.Add(
+                new ServiceConfigurationAnalyzer());
+        }
+
+        _analyzers = registered;
 
         if (_analyzers.Count == 0)
         {
@@ -26,7 +38,8 @@ public sealed class AssessmentEngine
                 nameof(analyzers));
         }
 
-        _metricAnalyzer = new MetricAnalyzer();
+        _metricAnalyzer =
+            new MetricAnalyzer();
     }
 
     public ScanResult Analyze(
@@ -46,22 +59,26 @@ public sealed class AssessmentEngine
     {
         if (resources == null)
         {
-            throw new ArgumentNullException(nameof(resources));
+            throw new ArgumentNullException(
+                nameof(resources));
         }
 
         if (subscription == null)
         {
-            throw new ArgumentNullException(nameof(subscription));
+            throw new ArgumentNullException(
+                nameof(subscription));
         }
 
         if (metrics == null)
         {
-            throw new ArgumentNullException(nameof(metrics));
+            throw new ArgumentNullException(
+                nameof(metrics));
         }
 
-        var findings = CollectFindings(
-            resources,
-            subscription);
+        var findings =
+            CollectFindings(
+                resources,
+                subscription);
 
         if (metrics.Count > 0)
         {
@@ -80,23 +97,39 @@ public sealed class AssessmentEngine
                 normalizedFindings);
 
         var stats =
-            BuildStats(resources);
+            BuildStats(
+                resources,
+                metrics);
 
         var scores =
-            ComputeScores(normalizedFindings);
+            ComputeScores(
+                normalizedFindings);
 
         var overallScore =
             CalculateOverallScore(scores);
 
         return new ScanResult
         {
-            SubscriptionName = subscription.Name,
-            SubscriptionId = subscription.Id,
-            Stats = stats,
-            Findings = normalizedFindings,
-            ScoresByCategory = scores,
-            Score = overallScore,
-            MetricProfiles = metrics.ToList()
+            SubscriptionName =
+                subscription.Name,
+
+            SubscriptionId =
+                subscription.Id,
+
+            Stats =
+                stats,
+
+            Findings =
+                normalizedFindings,
+
+            ScoresByCategory =
+                scores,
+
+            Score =
+                overallScore,
+
+            MetricProfiles =
+                metrics.ToList()
         };
     }
 
@@ -104,7 +137,8 @@ public sealed class AssessmentEngine
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
-        var findings = new List<Finding>();
+        var findings =
+            new List<Finding>();
 
         foreach (var analyzer in _analyzers)
         {
@@ -118,7 +152,8 @@ public sealed class AssessmentEngine
                 continue;
             }
 
-            findings.AddRange(analyzerFindings);
+            findings.AddRange(
+                analyzerFindings);
         }
 
         return findings;
@@ -134,8 +169,11 @@ public sealed class AssessmentEngine
                 StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .OrderBy(
-                finding => GetSeverityOrder(finding.Severity))
-            .ThenBy(finding => finding.Category)
+                finding =>
+                    GetSeverityOrder(
+                        finding.Severity))
+            .ThenBy(
+                finding => finding.Category)
             .ThenBy(
                 finding => finding.ResourceType,
                 StringComparer.OrdinalIgnoreCase)
@@ -152,11 +190,8 @@ public sealed class AssessmentEngine
         ApplyCorrelationSuppression(
             IReadOnlyList<Finding> findings)
     {
-        var result = findings.ToList();
-
-        // =====================================================
-        // VM: BACKUP + HA
-        // =====================================================
+        var result =
+            findings.ToList();
 
         var correlatedVmIds =
             result
@@ -169,37 +204,35 @@ public sealed class AssessmentEngine
                         finding.ResourceId)
                 .Where(
                     resourceId =>
-                        !string.IsNullOrWhiteSpace(resourceId))
+                        !string.IsNullOrWhiteSpace(
+                            resourceId))
                 .ToHashSet(
                     StringComparer.OrdinalIgnoreCase);
 
         if (correlatedVmIds.Count > 0)
         {
-            result = result
-                .Where(
-                    finding =>
-                    {
-                        if (!correlatedVmIds.Contains(
-                                finding.ResourceId ??
-                                string.Empty))
+            result =
+                result
+                    .Where(
+                        finding =>
                         {
-                            return true;
-                        }
+                            if (!correlatedVmIds.Contains(
+                                    finding.ResourceId ??
+                                    string.Empty))
+                            {
+                                return true;
+                            }
 
-                        return
-                            finding.RuleId !=
-                                "OPS-VM-NO-BACKUP" &&
-                            finding.RuleId !=
-                                "VM-NO-HA-DOMAIN" &&
-                            finding.RuleId !=
-                                "ARCH-VM-NO-HA-DOMAIN";
-                    })
-                .ToList();
+                            return
+                                finding.RuleId !=
+                                    "OPS-VM-NO-BACKUP" &&
+                                finding.RuleId !=
+                                    "VM-NO-HA-DOMAIN" &&
+                                finding.RuleId !=
+                                    "ARCH-VM-NO-HA-DOMAIN";
+                        })
+                    .ToList();
         }
-
-        // =====================================================
-        // STORAGE: LRS + SINGLE REGION
-        // =====================================================
 
         var correlatedStorageIds =
             result
@@ -212,30 +245,32 @@ public sealed class AssessmentEngine
                         finding.ResourceId)
                 .Where(
                     resourceId =>
-                        !string.IsNullOrWhiteSpace(resourceId))
+                        !string.IsNullOrWhiteSpace(
+                            resourceId))
                 .ToHashSet(
                     StringComparer.OrdinalIgnoreCase);
 
         if (correlatedStorageIds.Count > 0)
         {
-            result = result
-                .Where(
-                    finding =>
-                    {
-                        if (!correlatedStorageIds.Contains(
-                                finding.ResourceId ??
-                                string.Empty))
+            result =
+                result
+                    .Where(
+                        finding =>
                         {
-                            return true;
-                        }
+                            if (!correlatedStorageIds.Contains(
+                                    finding.ResourceId ??
+                                    string.Empty))
+                            {
+                                return true;
+                            }
 
-                        return
-                            finding.RuleId !=
-                                "ST-LRS-REPLICATION" &&
-                            finding.RuleId !=
-                                "ARCH-STORAGE-LRS";
-                    })
-                .ToList();
+                            return
+                                finding.RuleId !=
+                                    "ST-LRS-REPLICATION" &&
+                                finding.RuleId !=
+                                    "ARCH-STORAGE-LRS";
+                        })
+                    .ToList();
         }
 
         return result;
@@ -245,7 +280,8 @@ public sealed class AssessmentEngine
         Finding finding)
     {
         var resourceKey =
-            !string.IsNullOrWhiteSpace(finding.ResourceId)
+            !string.IsNullOrWhiteSpace(
+                finding.ResourceId)
                 ? finding.ResourceId
                 : finding.ResourceName;
 
@@ -267,44 +303,71 @@ public sealed class AssessmentEngine
     }
 
     private static ScanStats BuildStats(
-        IReadOnlyList<AzureResource> resources)
+        IReadOnlyList<AzureResource> resources,
+        IReadOnlyList<MetricProfile> metrics)
     {
         return new ScanStats
         {
-            Resources = resources.Count,
+            Resources =
+                resources.Count,
 
-            Vms = resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Compute/virtualMachines")),
+            ResourceTypes =
+                resources
+                    .Select(x => x.Type)
+                    .Distinct(
+                        StringComparer.OrdinalIgnoreCase)
+                    .Count(),
 
-            Disks = resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Compute/disks")),
+            EnrichedResources =
+                resources.Count(
+                    resource =>
+                        resource.Enrichment?.Success ==
+                        true),
 
-            Nsgs = resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Network/networkSecurityGroups")),
+            Relationships =
+                resources.Sum(
+                    resource =>
+                        resource.Relationships.Count),
 
-            PublicIps = resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Network/publicIPAddresses")),
+            MetricProfiles =
+                metrics.Count,
 
-            StorageAccounts = resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Storage/storageAccounts")),
+            Vms =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Compute/virtualMachines")),
+
+            Disks =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Compute/disks")),
+
+            Nsgs =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Network/networkSecurityGroups")),
+
+            PublicIps =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Network/publicIPAddresses")),
+
+            StorageAccounts =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Storage/storageAccounts")),
 
             Advisor = 0,
-
             MonthlyCostEur = 0
         };
     }
@@ -322,7 +385,8 @@ public sealed class AssessmentEngine
                 findings
                     .Where(
                         finding =>
-                            finding.Category == category)
+                            finding.Category ==
+                            category)
                     .ToList();
 
             var penalty =
@@ -346,7 +410,8 @@ public sealed class AssessmentEngine
             return 0;
         }
 
-        var totalPenalty = 0.0;
+        var totalPenalty =
+            0.0;
 
         var resourceGroups =
             findings

@@ -9,11 +9,20 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
-        var findings = new List<Finding>();
+        var findings =
+            new List<Finding>();
 
-        AnalyzeVmExposure(resources, findings);
-        AnalyzeVmResilience(resources, findings);
-        AnalyzeStorageResilience(resources, findings);
+        AnalyzeVmExposure(
+            resources,
+            findings);
+
+        AnalyzeVmResilience(
+            resources,
+            findings);
+
+        AnalyzeStorageResilience(
+            resources,
+            findings);
 
         return findings;
     }
@@ -22,130 +31,120 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
-        var vms = resources
-            .Where(resource =>
-                IsType(
-                    resource,
-                    "Microsoft.Compute/virtualMachines"))
-            .ToList();
+        var resourcesById =
+            resources.ToDictionary(
+                resource => resource.Id.TrimEnd('/'),
+                StringComparer.OrdinalIgnoreCase);
 
-        foreach (var vm in vms)
+        foreach (var vm in resources.Where(
+                     resource =>
+                         IsType(
+                             resource,
+                             "Microsoft.Compute/virtualMachines")))
         {
-            var nics = GetRelatedResources(
-                vm,
-                resources,
-                "NetworkInterface");
-
-            if (nics.Count == 0)
-                continue;
-
-            var publicIpFound = false;
-
-            var managementProtocols =
-                new HashSet<string>(
-                    StringComparer.OrdinalIgnoreCase);
+            var nics =
+                vm.Relationships
+                    .Where(
+                        relationship =>
+                            relationship.RelationshipType ==
+                            "NetworkInterface")
+                    .Select(
+                        relationship =>
+                            FindResource(
+                                resourcesById,
+                                relationship.TargetResourceId))
+                    .Where(
+                        resource =>
+                            resource != null)
+                    .ToList();
 
             foreach (var nic in nics)
             {
-                var publicIps = GetRelatedResources(
-                    nic,
-                    resources,
-                    "PublicIPAddress");
-
-                if (publicIps.Count > 0)
-                    publicIpFound = true;
-
-                var nicNsgs = GetRelatedResources(
-                    nic,
-                    resources,
-                    "NetworkSecurityGroup");
-
-                foreach (var nsg in nicNsgs)
+                if (nic == null)
                 {
-                    foreach (var protocol in
-                             GetInternetExposedManagementProtocols(nsg))
-                    {
-                        managementProtocols.Add(protocol);
-                    }
+                    continue;
                 }
 
-                var subnets = GetRelatedResources(
-                    nic,
-                    resources,
-                    "Subnet");
+                var publicIps =
+                    GetTargets(
+                        nic,
+                        "PublicIPAddress",
+                        resourcesById)
+                    .ToList();
 
-                foreach (var subnet in subnets)
+                var nsgs =
+                    GetTargets(
+                        nic,
+                        "NetworkSecurityGroup",
+                        resourcesById)
+                    .Concat(
+                        GetTargetsThroughSubnet(
+                            nic,
+                            resourcesById))
+                    .DistinctBy(
+                        resource => resource.Id,
+                        StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (publicIps.Count == 0 ||
+                    nsgs.Count == 0)
                 {
-                    var subnetNsgs = GetRelatedResources(
-                        subnet,
-                        resources,
-                        "NetworkSecurityGroup");
-
-                    foreach (var nsg in subnetNsgs)
-                    {
-                        foreach (var protocol in
-                                 GetInternetExposedManagementProtocols(nsg))
-                        {
-                            managementProtocols.Add(protocol);
-                        }
-                    }
+                    continue;
                 }
+
+                var exposed =
+                    nsgs.Any(
+                        nsg =>
+                            HasManagementExposure(
+                                nsg));
+
+                if (!exposed)
+                {
+                    continue;
+                }
+
+                findings.Add(
+                    new Finding(
+                        Id:
+                            $"CORR-VM-PUBLIC-IP-MGMT-EXPOSURE-{vm.Id}",
+
+                        Category:
+                            Category.Security,
+
+                        Severity:
+                            Severity.Critical,
+
+                        RuleId:
+                            "CORR-VM-PUBLIC-IP-MGMT-EXPOSURE",
+
+                        Title:
+                            "VM esposta a Internet tramite IP pubblico e regole di management",
+
+                        Description:
+                            $"La VM {vm.Name} dispone di un percorso " +
+                            "verso un Public IP e almeno un NSG consente " +
+                            "traffico inbound di management da Internet.",
+
+                        Impact:
+                            "La combinazione di esposizione pubblica e " +
+                            "porte di management aumenta significativamente " +
+                            "la superficie di attacco della VM.",
+
+                        Recommendation:
+                            "Rimuovere l'esposizione pubblica ove possibile " +
+                            "e consentire l'accesso amministrativo tramite " +
+                            "Private connectivity, VPN, Bastion o regole " +
+                            "di rete fortemente limitate.",
+
+                        ResourceName:
+                            vm.Name,
+
+                        ResourceType:
+                            vm.Type,
+
+                        ResourceId:
+                            vm.Id));
             }
-
-            if (!publicIpFound ||
-                managementProtocols.Count == 0)
-            {
-                continue;
-            }
-
-            var protocolText = string.Join(
-                ", ",
-                managementProtocols.OrderBy(
-                    protocol => protocol,
-                    StringComparer.OrdinalIgnoreCase));
-
-            findings.Add(
-                new Finding(
-                    Id:
-                        $"CORR-VM-EXPOSURE-{vm.Id}",
-
-                    Category:
-                        Category.Security,
-
-                    Severity:
-                        Severity.Critical,
-
-                    RuleId:
-                        "CORR-VM-PUBLIC-IP-MGMT-EXPOSURE",
-
-                    Title:
-                        "VM esposta a Internet tramite Public IP e NSG",
-
-                    Description:
-                        $"La VM '{vm.Name}' è associata a una Public IP " +
-                        $"e dispone di un percorso NSG che consente " +
-                        $"traffico amministrativo da Internet " +
-                        $"({protocolText}).",
-
-                    Impact:
-                        "La combinazione di esposizione pubblica e accesso " +
-                        "amministrativo aumenta significativamente " +
-                        "la superficie di attacco della VM.",
-
-                    Recommendation:
-                        "Rimuovere la Public IP quando non necessaria " +
-                        "e preferire Azure Bastion, VPN, ExpressRoute " +
-                        "o un percorso amministrativo privato. " +
-                        "Limitare inoltre le regole NSG a sorgenti specifiche.",
-
-                    ResourceName:
-                        vm.Name,
-
-                    ResourceType:
-                        vm.Type,
-
-                    ResourceId:
-                        vm.Id));
         }
     }
 
@@ -153,33 +152,40 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
-        var vms = resources
-            .Where(resource =>
-                IsType(
-                    resource,
-                    "Microsoft.Compute/virtualMachines"))
-            .ToList();
-
-        foreach (var vm in vms)
+        foreach (var vm in resources.Where(
+                     resource =>
+                         IsType(
+                             resource,
+                             "Microsoft.Compute/virtualMachines")))
         {
-            var properties = vm.GetEffectiveProperties();
+            var properties =
+                vm.GetEffectiveProperties();
 
             if (!properties.HasValue)
+            {
                 continue;
+            }
 
-            var backupProtected = GetBool(
-                properties.Value,
-                "cloudLensBackupProtected",
-                false);
+            var backupProtected =
+                GetBool(
+                    properties.Value,
+                    "cloudLensBackupProtected",
+                    false);
 
-            var hasAvailabilityZone =
-                HasAvailabilityZone(properties.Value);
+            if (backupProtected)
+            {
+                continue;
+            }
+
+            var hasZone =
+                HasAvailabilityZone(
+                    properties.Value);
 
             var hasAvailabilitySet =
-                HasAvailabilitySet(properties.Value);
+                HasAvailabilitySet(
+                    properties.Value);
 
-            if (backupProtected ||
-                hasAvailabilityZone ||
+            if (hasZone ||
                 hasAvailabilitySet)
             {
                 continue;
@@ -188,7 +194,7 @@ public sealed class CorrelationAnalyzer : IAnalyzer
             findings.Add(
                 new Finding(
                     Id:
-                        $"CORR-VM-RESILIENCE-{vm.Id}",
+                        $"CORR-VM-NO-BACKUP-NO-HA-{vm.Id}",
 
                     Category:
                         Category.Reliability,
@@ -203,18 +209,16 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                         "VM senza backup e senza ridondanza infrastrutturale",
 
                     Description:
-                        $"La VM '{vm.Name}' non risulta protetta " +
-                        "da Azure Backup e non risulta associata " +
-                        "ad Availability Zone o Availability Set.",
+                        $"La VM {vm.Name} non risulta protetta da Azure Backup " +
+                        "e non risulta associata a Availability Zone o Availability Set.",
 
                     Impact:
-                        "La combinazione aumenta il rischio sia di perdita " +
-                        "operativa dei dati sia di indisponibilità della VM.",
+                        "La combinazione aumenta il rischio di indisponibilità " +
+                        "e perdita dei dati in caso di failure.",
 
                     Recommendation:
-                        "Verificare i requisiti di continuità del workload " +
-                        "e configurare Azure Backup e una strategia " +
-                        "di ridondanza coerente con RTO e RPO.",
+                        "Valutare Azure Backup e un meccanismo di ridondanza " +
+                        "coerente con la criticità del workload.",
 
                     ResourceName:
                         vm.Name,
@@ -231,36 +235,49 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
-        var storageAccounts = resources
-            .Where(resource =>
-                IsType(
-                    resource,
-                    "Microsoft.Storage/storageAccounts"))
-            .ToList();
+        var storageAccounts =
+            resources
+                .Where(
+                    resource =>
+                        IsType(
+                            resource,
+                            "Microsoft.Storage/storageAccounts"))
+                .ToList();
 
         if (storageAccounts.Count == 0)
+        {
             return;
+        }
 
-        var locations = storageAccounts
-            .Select(storage => storage.Location)
-            .Where(location =>
-                !string.IsNullOrWhiteSpace(location))
-            .Distinct(
-                StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var locations =
+            storageAccounts
+                .Select(
+                    resource =>
+                        resource.Location)
+                .Where(
+                    location =>
+                        !string.IsNullOrWhiteSpace(
+                            location))
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
         if (locations.Count != 1)
+        {
             return;
+        }
 
         foreach (var storage in storageAccounts)
         {
             if (!IsLrs(storage))
+            {
                 continue;
+            }
 
             findings.Add(
                 new Finding(
                     Id:
-                        $"CORR-STORAGE-RESILIENCE-{storage.Id}",
+                        $"CORR-STORAGE-SINGLE-REGION-LRS-{storage.Id}",
 
                     Category:
                         Category.Reliability,
@@ -275,18 +292,16 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                         "Storage Account con LRS in ambiente single-region",
 
                     Description:
-                        $"Lo Storage Account '{storage.Name}' " +
-                        $"utilizza LRS e gli Storage Account analizzati " +
-                        $"sono tutti concentrati nella region " +
-                        $"'{locations[0]}'.",
+                        $"Lo Storage Account {storage.Name} utilizza LRS " +
+                        "mentre l'ambiente rilevato è distribuito in una sola region.",
 
                     Impact:
-                        "La combinazione riduce la resilienza rispetto " +
-                        "a configurazioni con ridondanza zonale o geografica.",
+                        "La combinazione riduce la resilienza geografica " +
+                        "della piattaforma.",
 
                     Recommendation:
-                        "Valutare ZRS, GRS o GZRS in funzione dei requisiti " +
-                        "di disponibilità, disaster recovery e workload.",
+                        "Valutare una replica ZRS, GRS o GZRS in funzione " +
+                        "dei requisiti di disponibilità e disaster recovery.",
 
                     ResourceName:
                         storage.Name,
@@ -299,216 +314,220 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         }
     }
 
-    private static List<AzureResource> GetRelatedResources(
-        AzureResource source,
-        IReadOnlyList<AzureResource> resources,
-        string relationshipType)
+    private static bool HasManagementExposure(
+        AzureResource nsg)
     {
-        var targetIds = source.Relationships
-            .Where(relationship =>
-                string.Equals(
-                    relationship.RelationshipType,
-                    relationshipType,
-                    StringComparison.OrdinalIgnoreCase))
-            .Select(relationship =>
-                relationship.TargetResourceId)
-            .ToHashSet(
-                StringComparer.OrdinalIgnoreCase);
-
-        if (targetIds.Count == 0)
-            return [];
-
-        return resources
-            .Where(resource =>
-                targetIds.Contains(resource.Id))
-            .ToList();
-    }
-
-    private static List<string>
-        GetInternetExposedManagementProtocols(
-            AzureResource nsg)
-    {
-        var result =
-            new HashSet<string>(
-                StringComparer.OrdinalIgnoreCase);
-
-        var properties = nsg.GetEffectiveProperties();
+        var properties =
+            nsg.GetEffectiveProperties();
 
         if (!properties.HasValue)
-            return [];
+        {
+            return false;
+        }
 
         if (!properties.Value.TryGetProperty(
                 "securityRules",
-                out var securityRules) ||
-            securityRules.ValueKind != JsonValueKind.Array)
+                out var rules) ||
+            rules.ValueKind !=
+                JsonValueKind.Array)
         {
-            return [];
+            return false;
         }
 
         foreach (var rule in
-                 securityRules.EnumerateArray())
+                 rules.EnumerateArray())
         {
-            if (!IsInboundAllowRuleFromInternet(rule))
-                continue;
+            var access =
+                GetString(
+                    rule,
+                    "access");
 
-            var destinationPorts =
-                GetDestinationPorts(rule);
+            var direction =
+                GetString(
+                    rule,
+                    "direction");
 
-            foreach (var port in destinationPorts)
+            var source =
+                GetString(
+                    rule,
+                    "sourceAddressPrefix");
+
+            var destinationPort =
+                GetString(
+                    rule,
+                    "destinationPortRange");
+
+            if (!string.Equals(
+                    access,
+                    "Allow",
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(
+                    direction,
+                    "Inbound",
+                    StringComparison.OrdinalIgnoreCase))
             {
-                switch (port)
-                {
-                    case "22":
-                        result.Add("SSH/22");
-                        break;
+                continue;
+            }
 
-                    case "3389":
-                        result.Add("RDP/3389");
-                        break;
-                }
+            var publicSource =
+                string.Equals(
+                    source,
+                    "*",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    source,
+                    "Internet",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    source,
+                    "0.0.0.0/0",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    source,
+                    "::/0",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!publicSource)
+            {
+                continue;
+            }
+
+            if (destinationPort == "22" ||
+                destinationPort == "3389" ||
+                destinationPort == "*" ||
+                destinationPort == "0-65535")
+            {
+                return true;
             }
         }
 
-        return result.ToList();
+        return false;
     }
 
-    private static bool IsInboundAllowRuleFromInternet(
-        JsonElement rule)
+    private static IEnumerable<AzureResource> GetTargets(
+        AzureResource resource,
+        string relationshipType,
+        IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
-        var direction = GetString(
-            rule,
-            "direction");
-
-        var access = GetString(
-            rule,
-            "access");
-
-        if (!string.Equals(
-                direction,
-                "Inbound",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!string.Equals(
-                access,
-                "Allow",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var sourcePrefixes =
-            GetStringArray(
-                rule,
-                "sourceAddressPrefixes");
-
-        var sourcePrefix =
-            GetString(
-                rule,
-                "sourceAddressPrefix");
-
-        if (!string.IsNullOrWhiteSpace(sourcePrefix))
-            sourcePrefixes.Add(sourcePrefix);
-
-        return sourcePrefixes.Any(prefix =>
-            string.Equals(
-                prefix,
-                "*",
-                StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(
-                prefix,
-                "Internet",
-                StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(
-                prefix,
-                "0.0.0.0/0",
-                StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(
-                prefix,
-                "::/0",
-                StringComparison.OrdinalIgnoreCase));
+        return resource.Relationships
+            .Where(
+                relationship =>
+                    relationship.RelationshipType ==
+                    relationshipType)
+            .Select(
+                relationship =>
+                    FindResource(
+                        resourcesById,
+                        relationship.TargetResourceId))
+            .Where(
+                target =>
+                    target != null)!;
     }
 
-    private static List<string> GetDestinationPorts(
-        JsonElement rule)
+    private static IEnumerable<AzureResource>
+        GetTargetsThroughSubnet(
+            AzureResource nic,
+            IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
-        var result =
-            GetStringArray(
-                rule,
-                "destinationPortRanges");
+        var subnets =
+            GetTargets(
+                nic,
+                "Subnet",
+                resourcesById);
 
-        var single =
-            GetString(
-                rule,
-                "destinationPortRange");
-
-        if (!string.IsNullOrWhiteSpace(single))
-            result.Add(single);
-
-        return result;
+        return subnets.SelectMany(
+            subnet =>
+                GetTargets(
+                    subnet,
+                    "NetworkSecurityGroup",
+                    resourcesById));
     }
 
-    private static bool HasAvailabilityZone(
-        JsonElement properties)
+    private static AzureResource? FindResource(
+        IReadOnlyDictionary<string, AzureResource> resourcesById,
+        string id)
     {
-        if (!properties.TryGetProperty(
-                "zones",
-                out var zones))
-        {
-            return false;
-        }
+        var normalized =
+            id.TrimEnd('/');
 
-        return zones.ValueKind == JsonValueKind.Array &&
-               zones.GetArrayLength() > 0;
-    }
-
-    private static bool HasAvailabilitySet(
-        JsonElement properties)
-    {
-        if (!properties.TryGetProperty(
-                "availabilitySet",
-                out var availabilitySet) ||
-            availabilitySet.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        if (!availabilitySet.TryGetProperty(
-                "id",
-                out var id))
-        {
-            return false;
-        }
-
-        return id.ValueKind == JsonValueKind.String &&
-               !string.IsNullOrWhiteSpace(id.GetString());
+        return resourcesById.TryGetValue(
+            normalized,
+            out var resource)
+            ? resource
+            : null;
     }
 
     private static bool IsLrs(
         AzureResource resource)
     {
-        if (resource.Sku is not JsonElement sku)
+        if (!resource.Sku.HasValue)
+        {
             return false;
+        }
 
-        var name = GetString(
-            sku,
-            "name");
+        if (!resource.Sku.Value.TryGetProperty(
+                "name",
+                out var name))
+        {
+            return false;
+        }
 
-        return !string.IsNullOrWhiteSpace(name) &&
-               name.Contains(
-                   "LRS",
-                   StringComparison.OrdinalIgnoreCase);
+        var value =
+            name.GetString();
+
+        return
+            !string.IsNullOrWhiteSpace(value) &&
+            value.Contains(
+                "LRS",
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasAvailabilityZone(
+        JsonElement properties)
+    {
+        return
+            properties.TryGetProperty(
+                "zones",
+                out var zones) &&
+            zones.ValueKind == JsonValueKind.Array &&
+            zones.GetArrayLength() > 0;
+    }
+
+    private static bool HasAvailabilitySet(
+        JsonElement properties)
+    {
+        return
+            properties.TryGetProperty(
+                "availabilitySet",
+                out var availabilitySet) &&
+            availabilitySet.ValueKind ==
+                JsonValueKind.Object &&
+            availabilitySet.TryGetProperty(
+                "id",
+                out var id) &&
+            id.ValueKind ==
+                JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(
+                id.GetString());
+    }
+
+    private static bool IsType(
+        AzureResource resource,
+        string type)
+    {
+        return string.Equals(
+            resource.Type,
+            type,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool GetBool(
         JsonElement element,
-        string property,
+        string propertyName,
         bool defaultValue)
     {
         if (!element.TryGetProperty(
-                property,
+                propertyName,
                 out var value))
         {
             return defaultValue;
@@ -524,52 +543,18 @@ public sealed class CorrelationAnalyzer : IAnalyzer
 
     private static string? GetString(
         JsonElement element,
-        string property)
+        string propertyName)
     {
         if (!element.TryGetProperty(
-                property,
-                out var value) ||
-            value.ValueKind != JsonValueKind.String)
+                propertyName,
+                out var value))
         {
             return null;
         }
 
-        return value.GetString();
-    }
-
-    private static List<string> GetStringArray(
-        JsonElement element,
-        string property)
-    {
-        var result = new List<string>();
-
-        if (!element.TryGetProperty(
-                property,
-                out var value) ||
-            value.ValueKind != JsonValueKind.Array)
-        {
-            return result;
-        }
-
-        foreach (var item in value.EnumerateArray())
-        {
-            if (item.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(item.GetString()))
-            {
-                result.Add(item.GetString()!);
-            }
-        }
-
-        return result;
-    }
-
-    private static bool IsType(
-        AzureResource resource,
-        string expectedType)
-    {
-        return string.Equals(
-            resource.Type,
-            expectedType,
-            StringComparison.OrdinalIgnoreCase);
+        return value.ValueKind ==
+               JsonValueKind.String
+            ? value.GetString()
+            : null;
     }
 }
