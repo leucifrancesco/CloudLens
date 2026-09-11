@@ -95,7 +95,6 @@ public sealed class ScanStats
 public sealed class ScanResult
 {
     public string SubscriptionName { get; init; } = "";
-
     public string SubscriptionId { get; init; } = "";
 
     public int Score { get; init; }
@@ -108,8 +107,9 @@ public sealed class ScanResult
 
     public List<MetricProfile> MetricProfiles { get; set; } = [];
 
-    public CoverageReport Coverage { get; set; } =
-        new();
+    public CoverageReport Coverage { get; set; } = new();
+
+    public RemediationPlan Remediation { get; set; } = new();
 }
 
 public sealed class AzureMetricAggregate
