@@ -16,7 +16,6 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-
         <!-- =====================================================
              HEADER
              ===================================================== -->
@@ -52,7 +51,6 @@
 
             <StackPanel Margin="36">
 
-
                 <!-- =================================================
                      TITLE
                      ================================================= -->
@@ -65,7 +63,7 @@
                                    FontSize="30"
                                    FontWeight="SemiBold"/>
 
-                        <TextBlock Text="Analisi read-only dell'ambiente Azure"
+                        <TextBlock Text="Analisi read-only completa dell'ambiente Azure"
                                    Foreground="#5E6B7A"
                                    Margin="0,6,0,0"/>
 
@@ -102,17 +100,12 @@
                                    FontSize="12"
                                    Margin="0,4,0,15"/>
 
-
                         <Grid>
 
                             <Grid.ColumnDefinitions>
-
                                 <ColumnDefinition Width="*"/>
-
                                 <ColumnDefinition Width="Auto"/>
-
                             </Grid.ColumnDefinitions>
-
 
                             <!-- TENANT -->
 
@@ -139,7 +132,6 @@
                                     VerticalAlignment="Bottom"/>
 
                         </Grid>
-
 
                         <TextBlock Text="Il browser Microsoft verrà aperto per autenticare l'account. CloudLens utilizza esclusivamente i permessi già assegnati al tuo account Azure."
                                    Foreground="#687687"
@@ -169,13 +161,20 @@
                                    FontWeight="SemiBold"/>
 
 
-                        <TextBlock Text="Subscription"
+                        <TextBlock Text="Subscription disponibili"
                                    FontWeight="SemiBold"
                                    Margin="0,15,0,6"/>
 
 
                         <ComboBox x:Name="Subscription"
                                   Height="35"/>
+
+
+                        <TextBlock Text="La subscription selezionata viene mantenuta per compatibilità e consultazione. La scansione reale analizza tutte le subscription accessibili nel tenant."
+                                   Foreground="#687687"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Margin="0,7,0,0"/>
 
 
                         <!-- METRIC WINDOW -->
@@ -187,30 +186,34 @@
                                        VerticalAlignment="Center"
                                        FontWeight="SemiBold"/>
 
-
                             <RadioButton x:Name="Metrics7"
                                          Content="7 giorni"
                                          Margin="20,0,0,0"
                                          IsChecked="True"
                                          VerticalAlignment="Center"/>
 
-
                             <RadioButton x:Name="Metrics30"
                                          Content="30 giorni"
                                          Margin="15,0,0,0"
                                          VerticalAlignment="Center"/>
-
 
                             <RadioButton x:Name="Metrics90"
                                          Content="90 giorni"
                                          Margin="15,0,0,0"
                                          VerticalAlignment="Center"/>
 
-
                             <Button x:Name="RunAssessmentButton"
-                                    Content="Avvia assessment"
+                                    Content="Scansiona intero tenant"
                                     Click="Run_Click"
-                                    Margin="20,0,0,0"/>
+                                    Margin="20,0,0,0"
+                                    Padding="18,4"/>
+
+                            <Button x:Name="ExportReportButton"
+                                    Content="Esporta report HTML"
+                                    Click="ExportReport_Click"
+                                    Margin="10,0,0,0"
+                                    Padding="18,4"
+                                    IsEnabled="False"/>
 
                         </StackPanel>
 
@@ -276,15 +279,10 @@
                     <Grid Margin="0,12,0,20">
 
                         <Grid.ColumnDefinitions>
-
                             <ColumnDefinition/>
-
                             <ColumnDefinition/>
-
                             <ColumnDefinition/>
-
                             <ColumnDefinition/>
-
                         </Grid.ColumnDefinitions>
 
 
@@ -396,38 +394,31 @@
                               HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal">
 
-
                         <DataGrid.Columns>
 
                             <DataGridTextColumn Header="Categoria"
                                                 Binding="{Binding Category}"
                                                 Width="130"/>
 
-
                             <DataGridTextColumn Header="Gravità"
                                                 Binding="{Binding Severity}"
                                                 Width="100"/>
 
-
                             <DataGridTextColumn Header="Rule"
                                                 Binding="{Binding RuleId}"
-                                                Width="150"/>
-
+                                                Width="180"/>
 
                             <DataGridTextColumn Header="Titolo"
                                                 Binding="{Binding Title}"
                                                 Width="2*"/>
 
-
                             <DataGridTextColumn Header="Risorsa"
                                                 Binding="{Binding ResourceName}"
                                                 Width="*"/>
 
-
                             <DataGridTextColumn Header="Tipo risorsa"
                                                 Binding="{Binding ResourceType}"
-                                                Width="220"/>
-
+                                                Width="240"/>
 
                             <DataGridTextColumn Header="€/mese"
                                                 Binding="{Binding MonthlySavingEur,StringFormat=N2}"
@@ -448,7 +439,7 @@
                                Margin="0,30,0,8"/>
 
 
-                    <TextBlock Text="Metriche disponibili raccolte da Azure Monitor per le risorse rilevate."
+                    <TextBlock Text="Metriche raccolte da Azure Monitor per le risorse rilevate."
                                Foreground="#687687"
                                FontSize="12"
                                Margin="0,0,0,10"/>
@@ -462,60 +453,35 @@
                               HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal">
 
-
                         <DataGrid.Columns>
-
-
-                            <!-- RESOURCE -->
 
                             <DataGridTextColumn Header="Risorsa"
                                                 Binding="{Binding ResourceName}"
                                                 Width="*"/>
 
-
-                            <!-- RESOURCE TYPE -->
-
                             <DataGridTextColumn Header="Tipo"
                                                 Binding="{Binding ResourceType}"
                                                 Width="240"/>
-
-
-                            <!-- METRIC -->
 
                             <DataGridTextColumn Header="Metrica"
                                                 Binding="{Binding MetricName}"
                                                 Width="200"/>
 
-
-                            <!-- AVERAGE -->
-
                             <DataGridTextColumn Header="Media"
                                                 Binding="{Binding Average,StringFormat=N2}"
                                                 Width="100"/>
-
-
-                            <!-- MINIMUM -->
 
                             <DataGridTextColumn Header="Min"
                                                 Binding="{Binding Minimum,StringFormat=N2}"
                                                 Width="100"/>
 
-
-                            <!-- MAXIMUM -->
-
                             <DataGridTextColumn Header="Max"
                                                 Binding="{Binding Maximum,StringFormat=N2}"
                                                 Width="100"/>
 
-
-                            <!-- SAMPLES -->
-
                             <DataGridTextColumn Header="Campioni"
                                                 Binding="{Binding SampleCount}"
                                                 Width="90"/>
-
-
-                            <!-- LOOKBACK -->
 
                             <DataGridTextColumn Header="Giorni"
                                                 Binding="{Binding LookbackDays}"

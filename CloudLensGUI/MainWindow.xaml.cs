@@ -2,12 +2,14 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
 using CloudLens.Core;
 using CloudLens.Core.Azure;
+using Microsoft.Win32;
 
 namespace CloudLensGUI;
 
@@ -21,12 +23,13 @@ public partial class MainWindow : Window
 
     private ScanResult? _result;
 
+    private CloudLens.Core.TenantScanResult? _tenantResult;
+
     private string? _tenantId;
 
     private string? _accessToken;
 
     private bool _authenticated;
-
 
     public MainWindow()
     {
@@ -38,11 +41,6 @@ public partial class MainWindow : Window
         Subscription.SelectedIndex = 0;
     }
 
-
-    // =========================================================
-    // DEMO
-    // =========================================================
-
     private void Demo_Click(
         object sender,
         RoutedEventArgs e)
@@ -51,18 +49,14 @@ public partial class MainWindow : Window
             DemoAnalyzer.CreateDemo());
     }
 
-
-    // =========================================================
-    // MICROSOFT LOGIN
-    // =========================================================
-
     private async void Login_Click(
         object sender,
         RoutedEventArgs e)
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(Tenant.Text))
+            if (string.IsNullOrWhiteSpace(
+                    Tenant.Text))
             {
                 MessageBox.Show(
                     "Inserire il Tenant ID.",
@@ -89,11 +83,6 @@ public partial class MainWindow : Window
             _collector ??=
                 new AzureCollector(_http);
 
-
-            // -------------------------------------------------
-            // LOGIN + SUBSCRIPTION DISCOVERY
-            // -------------------------------------------------
-
             var authenticator =
                 new AzureAuthenticator(_http);
 
@@ -102,33 +91,22 @@ public partial class MainWindow : Window
                     .GetInteractiveAccessTokenAsync(
                         _tenantId);
 
-
             var client =
                 new AzureResourceClient(
                     _http,
                     _accessToken);
 
-
             _subscriptions =
                 await client.GetSubscriptionsAsync();
 
-
-            // -------------------------------------------------
-            // SUBSCRIPTION LIST
-            // -------------------------------------------------
-
             Subscription.Items.Clear();
 
-            foreach (var subscription in _subscriptions)
+            foreach (var subscription in
+                     _subscriptions)
             {
                 Subscription.Items.Add(
                     $"{subscription.Name} ({subscription.Id})");
             }
-
-
-            // -------------------------------------------------
-            // NESSUNA SUBSCRIPTION
-            // -------------------------------------------------
 
             if (_subscriptions.Count == 0)
             {
@@ -141,18 +119,14 @@ public partial class MainWindow : Window
                     "Autenticazione riuscita, ma nessuna subscription è accessibile.";
 
                 MessageBox.Show(
-                    "L'autenticazione Microsoft è riuscita, ma il tuo account non vede alcuna subscription Azure.",
+                    "L'autenticazione Microsoft è riuscita, " +
+                    "ma il tuo account non vede alcuna subscription Azure.",
                     "CloudLens",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
 
                 return;
             }
-
-
-            // -------------------------------------------------
-            // LOGIN COMPLETATO
-            // -------------------------------------------------
 
             Subscription.SelectedIndex = 0;
 
@@ -161,7 +135,8 @@ public partial class MainWindow : Window
             Progress.Value = 100;
 
             StatusText.Text =
-                $"Autenticazione riuscita. {_subscriptions.Count} subscription disponibili.";
+                $"Autenticazione riuscita. " +
+                $"{_subscriptions.Count} subscription disponibili.";
         }
         catch (Exception ex)
         {
@@ -184,11 +159,6 @@ public partial class MainWindow : Window
         }
     }
 
-
-    // =========================================================
-    // ASSESSMENT
-    // =========================================================
-
     private async void Run_Click(
         object sender,
         RoutedEventArgs e)
@@ -196,7 +166,8 @@ public partial class MainWindow : Window
         try
         {
             if (!_authenticated ||
-                string.IsNullOrWhiteSpace(_accessToken))
+                string.IsNullOrWhiteSpace(
+                    _accessToken))
             {
                 MessageBox.Show(
                     "Prima effettuare l'accesso con Microsoft.",
@@ -218,15 +189,11 @@ public partial class MainWindow : Window
                 return;
             }
 
-
-            var index =
-                Subscription.SelectedIndex;
-
-            if (index < 0 ||
-                index >= _subscriptions.Count)
+            if (string.IsNullOrWhiteSpace(
+                    _tenantId))
             {
                 MessageBox.Show(
-                    "Selezionare una subscription.",
+                    "Tenant ID non disponibile.",
                     "CloudLens",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -234,52 +201,40 @@ public partial class MainWindow : Window
                 return;
             }
 
-
             SetBusy(true);
 
             StatusPanel.Visibility =
                 Visibility.Visible;
 
             StatusText.Text =
-                "Esecuzione assessment Azure...";
+                $"Avvio scansione completa del tenant " +
+                $"({_subscriptions.Count} subscription)...";
 
-            Progress.IsIndeterminate =
-                true;
-
+            Progress.IsIndeterminate = true;
 
             _collector ??=
                 new AzureCollector(_http);
 
+            _tenantResult =
+                await _collector
+                    .ScanTenantInteractiveAsync(
+                        _tenantId,
+                        _accessToken,
+                        _subscriptions);
 
-            var selected =
-                _subscriptions[index];
-
-
-            // -------------------------------------------------
-            // ASSESSMENT CON TOKEN ESISTENTE
-            // -------------------------------------------------
-
-            var result =
-                await _collector.ScanInteractiveAsync(
-                    _accessToken,
-                    selected);
-
-
-            Progress.IsIndeterminate =
-                false;
-
-            Progress.Value =
-                100;
+            Progress.IsIndeterminate = false;
+            Progress.Value = 100;
 
             StatusText.Text =
-                "Assessment completato.";
+                $"Assessment tenant completato: " +
+                $"{_tenantResult.TotalResources} risorse analizzate.";
 
-            LoadResult(result);
+            LoadTenantResult(
+                _tenantResult);
         }
         catch (Exception ex)
         {
-            Progress.IsIndeterminate =
-                false;
+            Progress.IsIndeterminate = false;
 
             StatusText.Text =
                 "Assessment fallito.";
@@ -296,10 +251,65 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ExportReport_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_tenantResult == null)
+        {
+            MessageBox.Show(
+                "Eseguire prima una scansione del tenant.",
+                "CloudLens",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
 
-    // =========================================================
-    // UI STATE
-    // =========================================================
+            return;
+        }
+
+        var dialog =
+            new SaveFileDialog
+            {
+                Title =
+                    "Salva CloudLens Assessment Report",
+
+                Filter =
+                    "HTML report (*.html)|*.html",
+
+                FileName =
+                    $"CloudLens-Assessment-" +
+                    $"{DateTime.Now:yyyyMMdd-HHmmss}.html"
+            };
+
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var html =
+                AssessmentReportBuilder.BuildHtml(
+                    _tenantResult);
+
+            File.WriteAllText(
+                dialog.FileName,
+                html);
+
+            MessageBox.Show(
+                $"Report salvato:\n{dialog.FileName}",
+                "CloudLens",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                ex.Message,
+                "CloudLens — errore export report",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
 
     private void SetBusy(
         bool busy)
@@ -318,14 +328,16 @@ public partial class MainWindow : Window
         DemoButton.IsEnabled =
             !busy;
 
+        ExportReportButton.IsEnabled =
+            !busy &&
+            _tenantResult != null;
+
         Tenant.IsEnabled =
             !busy;
+
+        Subscription.IsEnabled =
+            !busy;
     }
-
-
-    // =========================================================
-    // RESULTS
-    // =========================================================
 
     private void LoadResult(
         ScanResult result)
@@ -344,7 +356,8 @@ public partial class MainWindow : Window
 
         var saving =
             result.Findings.Sum(
-                x => x.MonthlySavingEur);
+                x =>
+                    x.MonthlySavingEur);
 
         Saving.Text =
             $"€ {saving:N2}";
@@ -357,5 +370,38 @@ public partial class MainWindow : Window
 
         MetricsGrid.ItemsSource =
             result.MetricProfiles;
+    }
+
+    private void LoadTenantResult(
+        CloudLens.Core.TenantScanResult result)
+    {
+        Results.Visibility =
+            Visibility.Visible;
+
+        Score.Text =
+            $"{result.OverallScore}/100";
+
+        FindingCount.Text =
+            result.AllFindings.Count.ToString();
+
+        var saving =
+            result.AllFindings.Sum(
+                x =>
+                    x.MonthlySavingEur);
+
+        Saving.Text =
+            $"€ {saving:N2}";
+
+        SavingYear.Text =
+            $"€ {saving * 12:N2}";
+
+        FindingsGrid.ItemsSource =
+            result.AllFindings;
+
+        MetricsGrid.ItemsSource =
+            result.AllMetricProfiles;
+
+        ExportReportButton.IsEnabled =
+            true;
     }
 }
