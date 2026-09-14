@@ -27,76 +27,77 @@ nameof(assessment));
           <meta name="viewport" content="width=device-width,initial-scale=1">
           <title>CloudLens Azure Assessment</title>
           <style>
+
             body {
               font-family: Segoe UI, Arial, sans-serif;
               margin: 0;
               background: #f5f7fa;
               color: #172033;
             }
+
             .container {
-              max-width: 1400px;
+              max-width: 1500px;
               margin: 0 auto;
-              padding: 40px;
+              padding: 36px;
             }
+
             .header {
               background: #0d1524;
               color: white;
               padding: 30px;
-              border-radius: 12px;
+              border-radius: 14px;
               margin-bottom: 24px;
             }
-            h1 { margin: 0 0 8px 0; }
+
+            .header h1 {
+              margin: 0 0 8px 0;
+              font-size: 30px;
+            }
+
+            .header-subtitle {
+              color: #afc1d8;
+              font-size: 13px;
+            }
+
             h2 {
               margin-top: 36px;
               border-bottom: 1px solid #dfe5ec;
               padding-bottom: 8px;
             }
-            .muted { color: #667085; }
+
+            h3 {
+              margin-top: 0;
+            }
+
+            .muted {
+              color: #667085;
+            }
+
             .grid {
               display: grid;
               grid-template-columns:
-                repeat(auto-fit,minmax(180px,1fr));
+                repeat(auto-fit,minmax(170px,1fr));
               gap: 12px;
             }
+
             .card {
               background: white;
               border: 1px solid #e1e6ec;
               border-radius: 10px;
               padding: 18px;
             }
+
             .value {
               font-size: 28px;
               font-weight: 700;
               margin-top: 5px;
             }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              background: white;
-              margin-top: 12px;
-            }
-            th, td {
-              padding: 10px;
-              border-bottom: 1px solid #e5e7eb;
-              text-align: left;
-              vertical-align: top;
-            }
-            th {
-              background: #eef2f6;
-            }
-            .critical { font-weight: 700; }
-            .high { font-weight: 700; }
-            .medium { font-weight: 600; }
-            .low { font-weight: 500; }
-            .ready {
+
+            .score {
+              font-size: 36px;
               font-weight: 700;
             }
-            .reviewrequired {
-              font-weight: 700;
-            }
-            .notautomatable {
-              font-weight: 700;
-            }
+
             .section {
               background: white;
               border: 1px solid #e1e6ec;
@@ -104,6 +105,92 @@ nameof(assessment));
               padding: 20px;
               margin-top: 16px;
             }
+
+            .category-grid {
+              display: grid;
+              grid-template-columns:
+                repeat(auto-fit,minmax(180px,1fr));
+              gap: 12px;
+            }
+
+            .category-card {
+              background: white;
+              border: 1px solid #e1e6ec;
+              border-radius: 10px;
+              padding: 16px;
+            }
+
+            .category-score {
+              font-size: 24px;
+              font-weight: 700;
+              margin: 4px 0 8px 0;
+            }
+
+            .bar {
+              width: 100%;
+              height: 7px;
+              background: #e5e7eb;
+              border-radius: 5px;
+              overflow: hidden;
+            }
+
+            .bar-value {
+              height: 100%;
+              background: #087ea4;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              background: white;
+              margin-top: 12px;
+            }
+
+            th,
+            td {
+              padding: 10px;
+              border-bottom: 1px solid #e5e7eb;
+              text-align: left;
+              vertical-align: top;
+            }
+
+            th {
+              background: #eef2f6;
+              font-weight: 600;
+            }
+
+            tr:last-child td {
+              border-bottom: none;
+            }
+
+            .critical {
+              font-weight: 700;
+            }
+
+            .high {
+              font-weight: 700;
+            }
+
+            .medium {
+              font-weight: 600;
+            }
+
+            .low {
+              font-weight: 500;
+            }
+
+            .ready {
+              font-weight: 700;
+            }
+
+            .reviewrequired {
+              font-weight: 700;
+            }
+
+            .notautomatable {
+              font-weight: 700;
+            }
+
             .command {
               display: block;
               white-space: pre-wrap;
@@ -112,12 +199,47 @@ nameof(assessment));
               border: 1px solid #d9dee5;
               border-radius: 6px;
               padding: 8px;
-              margin-top: 6px;
             }
+
             code {
               font-family: Consolas, monospace;
               font-size: 12px;
             }
+
+            .footer {
+              margin-top: 40px;
+              padding-top: 15px;
+              border-top: 1px solid #dfe5ec;
+              color: #667085;
+              font-size: 12px;
+            }
+
+            @media print {
+              body {
+                background: white;
+              }
+
+              .container {
+                max-width: none;
+                padding: 15px;
+              }
+
+              .section,
+              .card,
+              .category-card {
+                break-inside: avoid;
+              }
+
+              table {
+                break-inside: auto;
+              }
+
+              tr {
+                break-inside: avoid;
+                break-after: auto;
+              }
+            }
+
           </style>
         </head>
         <body>
@@ -131,8 +253,13 @@ nameof(assessment));
         "<h1>CloudLens Azure Assessment</h1>");
 
     html.AppendLine(
-        $"<div>Tenant: " +
-        $"{Encode(assessment.TenantId)}</div>");
+        "<div class=\"header-subtitle\">" +
+        "Tenant-wide Azure environment assessment" +
+        "</div>");
+
+    html.AppendLine(
+        $"<div style=\"margin-top:16px;\">" +
+        $"Tenant: {Encode(assessment.TenantId)}</div>");
 
     html.AppendLine(
         $"<div>Generated: " +
@@ -142,6 +269,10 @@ nameof(assessment));
         "</div>");
 
     AppendExecutiveSummary(
+        html,
+        assessment);
+
+    AppendCategoryScores(
         html,
         assessment);
 
@@ -171,6 +302,12 @@ nameof(assessment));
 
     html.AppendLine(
         """
+        <div class="footer">
+          Generated by CloudLens. Assessment is read-only.
+          Remediation actions are guidance only and do not execute
+          Azure resource changes automatically.
+        </div>
+
         </div>
         </body>
         </html>
@@ -178,6 +315,7 @@ nameof(assessment));
 
     return html.ToString();
 }
+
 
 private static void AppendExecutiveSummary(
     StringBuilder html,
@@ -245,6 +383,57 @@ private static void AppendExecutiveSummary(
         "</div>");
 }
 
+
+private static void AppendCategoryScores(
+    StringBuilder html,
+    TenantScanResult assessment)
+{
+    html.AppendLine(
+        "<h2>Category Scores</h2>");
+
+    html.AppendLine(
+        "<div class=\"category-grid\">");
+
+    foreach (var category in
+             Enum.GetValues<Category>())
+    {
+        var score =
+            assessment.ScoresByCategory.TryGetValue(
+                category,
+                out var categoryScore)
+                ? categoryScore
+                : 100;
+
+        html.AppendLine(
+            "<div class=\"category-card\">");
+
+        html.AppendLine(
+            $"<div class=\"muted\">" +
+            $"{Encode(category.ToString())}</div>");
+
+        html.AppendLine(
+            $"<div class=\"category-score\">" +
+            $"{score}/100</div>");
+
+        html.AppendLine(
+            "<div class=\"bar\">");
+
+        html.AppendLine(
+            $"<div class=\"bar-value\" " +
+            $"style=\"width:{Math.Clamp(score, 0, 100)}%\"></div>");
+
+        html.AppendLine(
+            "</div>");
+
+        html.AppendLine(
+            "</div>");
+    }
+
+    html.AppendLine(
+        "</div>");
+}
+
+
 private static void AppendCoverage(
     StringBuilder html,
     TenantScanResult assessment)
@@ -272,12 +461,134 @@ private static void AppendCoverage(
 
     AppendCard(
         html,
+        "Resource Types",
+        assessment.TotalResourceTypes.ToString());
+
+    AppendCard(
+        html,
         "Scan Duration",
         $"{(assessment.CompletedAt - assessment.StartedAt).TotalMinutes:F1} min");
 
     html.AppendLine(
         "</div>");
+
+    html.AppendLine(
+        "<div class=\"section\">");
+
+    html.AppendLine(
+        "<h3>Coverage by service</h3>");
+
+    var services =
+        assessment.Subscriptions
+            .SelectMany(
+                x =>
+                    x.Result
+                        .Coverage
+                        .Services)
+            .GroupBy(
+                x => x.ServiceFamily,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(
+                group =>
+                    new
+                    {
+                        ServiceFamily =
+                            group.Key,
+
+                        ResourceCount =
+                            group.Sum(
+                                x => x.ResourceCount),
+
+                        ResourceTypes =
+                            group.Sum(
+                                x => x.ResourceTypes),
+
+                        EnrichedResources =
+                            group.Sum(
+                                x => x.EnrichedResources),
+
+                        MetricProfiles =
+                            group.Sum(
+                                x => x.MetricProfiles),
+
+                        SpecializedAnalyzer =
+                            group.Any(
+                                x => x.SpecializedAnalyzer),
+
+                        Status =
+                            group.Any(
+                                x =>
+                                    x.Status ==
+                                    CoverageStatus.Supported)
+                                ? CoverageStatus.Supported
+                                : group.First().Status
+                    })
+            .OrderBy(
+                x => x.ServiceFamily,
+                StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    if (services.Count == 0)
+    {
+        html.AppendLine(
+            "<p class=\"muted\">" +
+            "No service coverage data available." +
+            "</p>");
+    }
+    else
+    {
+        html.AppendLine(
+            "<table>");
+
+        html.AppendLine(
+            "<tr>" +
+            "<th>Service</th>" +
+            "<th>Resources</th>" +
+            "<th>Resource Types</th>" +
+            "<th>Enriched</th>" +
+            "<th>Metric Profiles</th>" +
+            "<th>Analyzer</th>" +
+            "<th>Status</th>" +
+            "</tr>");
+
+        foreach (var service in services)
+        {
+            html.AppendLine(
+                "<tr>");
+
+            html.AppendLine(
+                $"<td>{Encode(service.ServiceFamily)}</td>");
+
+            html.AppendLine(
+                $"<td>{service.ResourceCount}</td>");
+
+            html.AppendLine(
+                $"<td>{service.ResourceTypes}</td>");
+
+            html.AppendLine(
+                $"<td>{service.EnrichedResources}</td>");
+
+            html.AppendLine(
+                $"<td>{service.MetricProfiles}</td>");
+
+            html.AppendLine(
+                $"<td>{(service.SpecializedAnalyzer ? "Yes" : "No")}</td>");
+
+            html.AppendLine(
+                $"<td>{Encode(service.Status.ToString())}</td>");
+
+            html.AppendLine(
+                "</tr>");
+        }
+
+        html.AppendLine(
+            "</table>");
+    }
+
+    html.AppendLine(
+        "</div>");
 }
+
 
 private static void AppendSubscriptions(
     StringBuilder html,
@@ -297,6 +608,7 @@ private static void AppendSubscriptions(
         "<th>Resource Types</th>" +
         "<th>Findings</th>" +
         "<th>Remediations</th>" +
+        "<th>Metrics</th>" +
         "</tr>");
 
     foreach (var item in
@@ -325,12 +637,16 @@ private static void AppendSubscriptions(
             $"<td>{item.Result.Remediation.TotalActions}</td>");
 
         html.AppendLine(
+            $"<td>{item.Result.MetricProfiles.Count}</td>");
+
+        html.AppendLine(
             "</tr>");
     }
 
     html.AppendLine(
         "</table>");
 }
+
 
 private static void AppendResourceInventory(
     StringBuilder html,
@@ -368,6 +684,7 @@ private static void AppendResourceInventory(
         "</table>");
 }
 
+
 private static void AppendFindings(
     StringBuilder html,
     TenantScanResult assessment)
@@ -394,6 +711,7 @@ private static void AppendFindings(
         "<th>Category</th>" +
         "<th>Rule</th>" +
         "<th>Resource</th>" +
+        "<th>Impact</th>" +
         "<th>Description</th>" +
         "<th>Recommendation</th>" +
         "</tr>");
@@ -425,7 +743,20 @@ private static void AppendFindings(
 
         html.AppendLine(
             $"<td>{Encode(finding.ResourceName)}<br>" +
-            $"<code>{Encode(finding.ResourceType)}</code></td>");
+            $"<code>{Encode(finding.ResourceType)}</code>");
+
+        if (!string.IsNullOrWhiteSpace(
+                finding.ResourceId))
+        {
+            html.AppendLine(
+                $"<br><code>{Encode(finding.ResourceId)}</code>");
+        }
+
+        html.AppendLine(
+            "</td>");
+
+        html.AppendLine(
+            $"<td>{Encode(finding.Impact)}</td>");
 
         html.AppendLine(
             $"<td>{Encode(finding.Description)}</td>");
@@ -441,6 +772,7 @@ private static void AppendFindings(
         "</table>");
 }
 
+
 private static void AppendRemediation(
     StringBuilder html,
     TenantScanResult assessment)
@@ -453,7 +785,7 @@ private static void AppendRemediation(
                         .Result
                         .Remediation
                         .Actions)
-            .OrderByDescending(
+            .OrderBy(
                 action =>
                     SeverityOrder(
                         action.Severity))
@@ -602,7 +934,7 @@ private static void AppendRemediation(
         {
             html.AppendLine(
                 "<td>" +
-                $"<code class=\"command\">" +
+                "<code class=\"command\">" +
                 $"{Encode(action.Command)}" +
                 "</code>" +
                 "</td>");
@@ -625,6 +957,7 @@ private static void AppendRemediation(
         "</table>");
 }
 
+
 private static string GetRemediationStatusLabel(
     RemediationStatus status)
 {
@@ -643,6 +976,7 @@ private static string GetRemediationStatusLabel(
             status.ToString()
     };
 }
+
 
 private static void AppendMetrics(
     StringBuilder html,
@@ -669,6 +1003,7 @@ private static void AppendMetrics(
         "<th>Resource</th>" +
         "<th>Type</th>" +
         "<th>Metric</th>" +
+        "<th>Unit</th>" +
         "<th>Average</th>" +
         "<th>Minimum</th>" +
         "<th>Maximum</th>" +
@@ -701,7 +1036,10 @@ private static void AppendMetrics(
             $"<td>{Encode(metric.MetricDisplayName ?? metric.MetricName)}</td>");
 
         html.AppendLine(
-            $"<td>{metric.Average:F2} {Encode(metric.Unit)}</td>");
+            $"<td>{Encode(metric.Unit)}</td>");
+
+        html.AppendLine(
+            $"<td>{metric.Average:F2}</td>");
 
         html.AppendLine(
             $"<td>{metric.Minimum:F2}</td>");
@@ -723,6 +1061,7 @@ private static void AppendMetrics(
         "</table>");
 }
 
+
 private static void AppendCard(
     StringBuilder html,
     string title,
@@ -740,6 +1079,7 @@ private static void AppendCard(
     html.AppendLine(
         "</div>");
 }
+
 
 private static string GetScoreDescription(
     int score)
@@ -763,6 +1103,7 @@ private static string GetScoreDescription(
     };
 }
 
+
 private static int SeverityOrder(
     Severity severity)
 {
@@ -775,6 +1116,7 @@ private static int SeverityOrder(
         _ => 4
     };
 }
+
 
 private static string Encode(
     string? value)
