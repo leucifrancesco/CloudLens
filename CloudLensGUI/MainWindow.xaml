@@ -1,882 +1,439 @@
 <Window x:Class="CloudLensGUI.MainWindow"
-     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-     Title="CloudLens — Azure Environment Analyzer"
-     Icon="assets/CloudLens.ico"
-     Height="950"
-     Width="1500"
-     MinHeight="700"
-     MinWidth="1150"
-     WindowStartupLocation="CenterScreen">
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CloudLens — Azure Environment Analyzer"
+        Icon="assets/CloudLens.ico"
+        Height="900"
+        Width="1450"
+        MinHeight="700"
+        MinWidth="1100"
+        WindowStartupLocation="CenterScreen">
 
-<Window.Resources>
+    <Grid Background="#F5F7FA">
 
-    <Style TargetType="TextBlock">
-        <Setter Property="FontFamily"
-                Value="Segoe UI"/>
-    </Style>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="72"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
 
-    <Style TargetType="Button">
-        <Setter Property="FontFamily"
-                Value="Segoe UI"/>
-        <Setter Property="Padding"
-                Value="14,6"/>
-    </Style>
+        <Border Background="#0D1524">
 
-    <Style TargetType="DataGrid">
-        <Setter Property="FontFamily"
-                Value="Segoe UI"/>
-        <Setter Property="FontSize"
-                Value="12"/>
-        <Setter Property="RowHeight"
-                Value="34"/>
-        <Setter Property="ColumnHeaderHeight"
-                Value="34"/>
-    </Style>
-
-</Window.Resources>
-
-
-<Grid Background="#F5F7FA">
-
-    <Grid.RowDefinitions>
-        <RowDefinition Height="72"/>
-        <RowDefinition Height="*"/>
-    </Grid.RowDefinitions>
-
-
-    <!-- =========================================================
-         HEADER
-         ========================================================= -->
-
-    <Border Background="#0D1524">
-
-        <DockPanel Margin="28,0">
-
-            <StackPanel Orientation="Horizontal"
-                        VerticalAlignment="Center">
+            <DockPanel Margin="28,0">
 
                 <TextBlock Text="CloudLens"
                            Foreground="White"
                            FontSize="24"
-                           FontWeight="SemiBold"/>
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"/>
 
                 <TextBlock Text="Azure Environment Analyzer"
                            Foreground="#AFC1D8"
                            FontSize="13"
-                           Margin="14,7,0,0"/>
+                           Margin="14,7,0,0"
+                           VerticalAlignment="Center"/>
 
-            </StackPanel>
+            </DockPanel>
 
-        </DockPanel>
+        </Border>
 
-    </Border>
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
 
+            <StackPanel Margin="36">
 
-    <!-- =========================================================
-         MAIN CONTENT
-         ========================================================= -->
+                <StackPanel Orientation="Horizontal">
 
-    <ScrollViewer Grid.Row="1"
-                  VerticalScrollBarVisibility="Auto"
-                  HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel>
 
-        <StackPanel Margin="36">
-
-
-            <!-- =================================================
-                 TITLE
-                 ================================================= -->
-
-            <Grid>
-
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-
-                <StackPanel>
-
-                    <TextBlock Text="Azure Assessment"
-                               FontSize="30"
-                               FontWeight="SemiBold"/>
-
-                    <TextBlock Text="Analisi read-only dell'ambiente Azure"
-                               Foreground="#5E6B7A"
-                               Margin="0,6,0,0"/>
-
-                </StackPanel>
-
-                <Button x:Name="DemoButton"
-                        Grid.Column="1"
-                        Content="Carica demo"
-                        Click="Demo_Click"
-                        VerticalAlignment="Center"
-                        Padding="20,7"/>
-
-            </Grid>
-
-
-            <!-- =================================================
-                 AZURE CONNECTION
-                 ================================================= -->
-
-            <Border Background="White"
-                    CornerRadius="10"
-                    Padding="24"
-                    BorderBrush="#E1E6EC"
-                    BorderThickness="1"
-                    Margin="0,25,0,0">
-
-                <StackPanel>
-
-                    <TextBlock Text="Connessione Azure"
-                               FontSize="18"
-                               FontWeight="SemiBold"/>
-
-                    <TextBlock Text="Accesso interattivo tramite account Microsoft"
-                               Foreground="#687687"
-                               FontSize="12"
-                               Margin="0,4,0,15"/>
-
-                    <Grid>
-
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-
-                        <StackPanel Margin="0,0,20,0">
-
-                            <TextBlock Text="Tenant ID"
-                                       FontWeight="SemiBold"/>
-
-                            <TextBox x:Name="Tenant"
-                                     Height="34"
-                                     Margin="0,6,0,0"/>
-
-                        </StackPanel>
-
-                        <Button x:Name="LoginButton"
-                                Grid.Column="1"
-                                Content="Accedi con Microsoft"
-                                Click="Login_Click"
-                                Height="36"
-                                Padding="20,0"
-                                VerticalAlignment="Bottom"/>
-
-                    </Grid>
-
-                    <TextBlock Text="CloudLens utilizza esclusivamente i permessi già assegnati al tuo account Azure."
-                               Foreground="#687687"
-                               FontSize="12"
-                               Margin="0,12,0,0"/>
-
-                </StackPanel>
-
-            </Border>
-
-
-            <!-- =================================================
-                 ASSESSMENT CONFIGURATION
-                 ================================================= -->
-
-            <Border Background="White"
-                    CornerRadius="10"
-                    Padding="24"
-                    BorderBrush="#E1E6EC"
-                    BorderThickness="1"
-                    Margin="0,20,0,0">
-
-                <StackPanel>
-
-                    <TextBlock Text="Configurazione assessment"
-                               FontSize="18"
-                               FontWeight="SemiBold"/>
-
-                    <TextBlock Text="Subscription disponibili"
-                               FontWeight="SemiBold"
-                               Margin="0,15,0,6"/>
-
-                    <ComboBox x:Name="Subscription"
-                              Height="35"/>
-
-                    <TextBlock Text="La subscription selezionata viene mantenuta per compatibilità e consultazione. La scansione reale analizza tutte le subscription accessibili nel tenant."
-                               Foreground="#687687"
-                               FontSize="12"
-                               TextWrapping="Wrap"
-                               Margin="0,7,0,0"/>
-
-                    <StackPanel Orientation="Horizontal"
-                                Margin="0,18,0,0">
-
-                        <TextBlock Text="Finestra metriche:"
-                                   VerticalAlignment="Center"
+                        <TextBlock Text="Azure Assessment"
+                                   FontSize="30"
                                    FontWeight="SemiBold"/>
 
-                        <RadioButton x:Name="Metrics7"
-                                     Content="7 giorni"
-                                     Margin="20,0,0,0"
-                                     IsChecked="True"
-                                     VerticalAlignment="Center"/>
-
-                        <RadioButton x:Name="Metrics30"
-                                     Content="30 giorni"
-                                     Margin="15,0,0,0"
-                                     VerticalAlignment="Center"/>
-
-                        <RadioButton x:Name="Metrics90"
-                                     Content="90 giorni"
-                                     Margin="15,0,0,0"
-                                     VerticalAlignment="Center"/>
-
-                        <Button x:Name="RunAssessmentButton"
-                                Content="Scansiona intero tenant"
-                                Click="Run_Click"
-                                Margin="24,0,0,0"
-                                Padding="18,4"/>
-
-                        <Button x:Name="ExportReportButton"
-                                Content="Esporta report HTML"
-                                Click="ExportReport_Click"
-                                Margin="10,0,0,0"
-                                Padding="18,4"
-                                IsEnabled="False"/>
+                        <TextBlock Text="Analisi read-only completa dell'ambiente Azure"
+                                   Foreground="#5E6B7A"
+                                   Margin="0,6,0,0"/>
 
                     </StackPanel>
 
-                </StackPanel>
-
-            </Border>
-
-
-            <!-- =================================================
-                 STATUS
-                 ================================================= -->
-
-            <Border x:Name="StatusPanel"
-                    Background="White"
-                    CornerRadius="10"
-                    Padding="20"
-                    BorderBrush="#E1E6EC"
-                    BorderThickness="1"
-                    Margin="0,20,0,0"
-                    Visibility="Collapsed">
-
-                <StackPanel>
-
-                    <TextBlock Text="Stato assessment"
-                               FontSize="18"
-                               FontWeight="SemiBold"/>
-
-                    <TextBlock x:Name="StatusText"
-                               Text="In attesa..."
-                               Margin="0,10,0,0"/>
-
-                    <ProgressBar x:Name="Progress"
-                                 Height="8"
-                                 Margin="0,12,0,0"
-                                 Minimum="0"
-                                 Maximum="100"/>
+                    <Button x:Name="DemoButton"
+                            Content="Carica demo"
+                            Click="Demo_Click"
+                            Margin="30,0,0,0"
+                            VerticalAlignment="Center"/>
 
                 </StackPanel>
-
-            </Border>
-
-
-            <!-- =================================================
-                 RESULTS DASHBOARD
-                 ================================================= -->
-
-            <StackPanel x:Name="Results"
-                        Visibility="Collapsed"
-                        Margin="0,28,0,0">
-
-                <TextBlock Text="Assessment Dashboard"
-                           FontSize="24"
-                           FontWeight="SemiBold"/>
-
-                <TextBlock Text="Riepilogo dell'ambiente analizzato e delle principali aree di intervento."
-                           Foreground="#687687"
-                           Margin="0,5,0,16"/>
-
-
-                <!-- =================================================
-                     PRIMARY KPI
-                     ================================================= -->
-
-                <Grid>
-
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                    </Grid.ColumnDefinitions>
-
-
-                    <Border Background="White"
-                            Padding="18"
-                            Margin="0,0,6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Overall Score"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="Score"
-                                       FontSize="28"
-                                       FontWeight="Bold"
-                                       Foreground="#087EA4"/>
-                        </StackPanel>
-
-                    </Border>
-
-
-                    <Border Grid.Column="1"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Risorse"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="ResourceCount"
-                                       FontSize="28"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-
-                    <Border Grid.Column="2"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Rilievi"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="FindingCount"
-                                       FontSize="28"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-
-                    <Border Grid.Column="3"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Remediation"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="RemediationCount"
-                                       FontSize="28"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-
-                    <Border Grid.Column="4"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Enrichment"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="EnrichmentCoverage"
-                                       FontSize="28"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-
-                    <Border Grid.Column="5"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0,0,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Metric Profiles"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="MetricProfileCount"
-                                       FontSize="28"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                </Grid>
-
-
-                <!-- =================================================
-                     SCORE BY CATEGORY
-                     ================================================= -->
-
-                <TextBlock Text="Score per categoria"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           Margin="0,28,0,10"/>
 
                 <Border Background="White"
-                        CornerRadius="8"
+                        CornerRadius="10"
+                        Padding="24"
                         BorderBrush="#E1E6EC"
                         BorderThickness="1"
-                        Padding="18">
+                        Margin="0,25,0,0">
 
-                    <ItemsControl x:Name="CategoryScoresPanel">
+                    <StackPanel>
 
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <UniformGrid Columns="4"/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
+                        <TextBlock Text="Connessione Azure"
+                                   FontSize="18"
+                                   FontWeight="SemiBold"/>
 
-                    </ItemsControl>
+                        <TextBlock Text="Accesso interattivo tramite account Microsoft"
+                                   Foreground="#687687"
+                                   FontSize="12"
+                                   Margin="0,4,0,15"/>
+
+                        <Grid>
+
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Margin="0,0,20,0">
+
+                                <TextBlock Text="Tenant ID"
+                                           FontWeight="SemiBold"/>
+
+                                <TextBox x:Name="Tenant"
+                                         Height="34"
+                                         Margin="0,6,0,0"/>
+
+                            </StackPanel>
+
+                            <Button x:Name="LoginButton"
+                                    Grid.Column="1"
+                                    Content="Accedi con Microsoft"
+                                    Click="Login_Click"
+                                    Height="36"
+                                    Padding="20,0"
+                                    VerticalAlignment="Bottom"/>
+
+                        </Grid>
+
+                        <TextBlock Text="Il browser Microsoft verrà aperto per autenticare l'account. CloudLens utilizza esclusivamente i permessi già assegnati al tuo account Azure."
+                                   Foreground="#687687"
+                                   FontSize="12"
+                                   Margin="0,12,0,0"/>
+
+                    </StackPanel>
 
                 </Border>
 
+                <Border Background="White"
+                        CornerRadius="10"
+                        Padding="24"
+                        BorderBrush="#E1E6EC"
+                        BorderThickness="1"
+                        Margin="0,20,0,0">
 
-                <!-- =================================================
-                     RISK SUMMARY
-                     ================================================= -->
+                    <StackPanel>
 
-                <TextBlock Text="Priorità"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           Margin="0,28,0,10"/>
+                        <TextBlock Text="Configurazione assessment"
+                                   FontSize="18"
+                                   FontWeight="SemiBold"/>
 
-                <Grid>
+                        <TextBlock Text="Subscription disponibili"
+                                   FontWeight="SemiBold"
+                                   Margin="0,15,0,6"/>
 
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                    </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="Subscription"
+                                  Height="35"/>
 
-                    <Border Background="White"
-                            Padding="18"
-                            Margin="0,0,6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
+                        <TextBlock Text="La subscription selezionata viene mantenuta per compatibilità e consultazione. La scansione reale analizza tutte le subscription accessibili nel tenant."
+                                   Foreground="#687687"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Margin="0,7,0,0"/>
 
-                        <StackPanel>
-                            <TextBlock Text="Critical"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="CriticalCount"
-                                       FontSize="26"
-                                       FontWeight="Bold"/>
+                        <StackPanel Orientation="Horizontal"
+                                    Margin="0,18,0,0">
+
+                            <TextBlock Text="Finestra metriche:"
+                                       VerticalAlignment="Center"
+                                       FontWeight="SemiBold"/>
+
+                            <RadioButton x:Name="Metrics7"
+                                         Content="7 giorni"
+                                         Margin="20,0,0,0"
+                                         IsChecked="True"
+                                         VerticalAlignment="Center"/>
+
+                            <RadioButton x:Name="Metrics30"
+                                         Content="30 giorni"
+                                         Margin="15,0,0,0"
+                                         VerticalAlignment="Center"/>
+
+                            <RadioButton x:Name="Metrics90"
+                                         Content="90 giorni"
+                                         Margin="15,0,0,0"
+                                         VerticalAlignment="Center"/>
+
+                            <Button x:Name="RunAssessmentButton"
+                                    Content="Scansiona intero tenant"
+                                    Click="Run_Click"
+                                    Margin="20,0,0,0"
+                                    Padding="18,4"/>
+
+                            <Button x:Name="ExportReportButton"
+                                    Content="Esporta report HTML"
+                                    Click="ExportReport_Click"
+                                    Margin="10,0,0,0"
+                                    Padding="18,4"
+                                    IsEnabled="False"/>
+
+                            <Button x:Name="ExportJsonButton"
+                                    Content="Esporta JSON"
+                                    Click="ExportJson_Click"
+                                    Margin="10,0,0,0"
+                                    Padding="18,4"
+                                    IsEnabled="False"/>
+
+                            <Button x:Name="ExportExcelButton"
+                                    Content="Esporta Excel"
+                                    Click="ExportExcel_Click"
+                                    Margin="10,0,0,0"
+                                    Padding="18,4"
+                                    IsEnabled="False"/>
+
                         </StackPanel>
 
-                    </Border>
-
-                    <Border Grid.Column="1"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="High"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="HighCount"
-                                       FontSize="26"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                    <Border Grid.Column="2"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Medium"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="MediumCount"
-                                       FontSize="26"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                    <Border Grid.Column="3"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0,0,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Low"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="LowCount"
-                                       FontSize="26"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                </Grid>
-
-
-                <!-- =================================================
-                     COST SUMMARY
-                     ================================================= -->
-
-                <TextBlock Text="Ottimizzazione costi"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           Margin="0,28,0,10"/>
-
-                <Grid>
-
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                    </Grid.ColumnDefinitions>
-
-                    <Border Background="White"
-                            Padding="18"
-                            Margin="0,0,6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Risparmio stimato / mese"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="Saving"
-                                       FontSize="28"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                    <Border Grid.Column="1"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0,0,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Risparmio stimato / anno"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="SavingYear"
-                                       FontSize="28"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                </Grid>
-
-
-                <!-- =================================================
-                     REMEDIATION SUMMARY
-                     ================================================= -->
-
-                <TextBlock Text="Remediation Plan"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           Margin="0,28,0,10"/>
-
-                <Grid>
-
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                        <ColumnDefinition/>
-                    </Grid.ColumnDefinitions>
-
-                    <Border Background="White"
-                            Padding="18"
-                            Margin="0,0,6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Ready"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="ReadyRemediationCount"
-                                       FontSize="26"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                    <Border Grid.Column="1"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Review Required"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="ReviewRemediationCount"
-                                       FontSize="26"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                    <Border Grid.Column="2"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Not Automatable"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="NotAutomatableCount"
-                                       FontSize="26"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                    <Border Grid.Column="3"
-                            Background="White"
-                            Padding="18"
-                            Margin="6,0,0,0"
-                            CornerRadius="8"
-                            BorderBrush="#E1E6EC"
-                            BorderThickness="1">
-
-                        <StackPanel>
-                            <TextBlock Text="Subscription"
-                                       Foreground="#667085"/>
-                            <TextBlock x:Name="SubscriptionCount"
-                                       FontSize="26"
-                                       FontWeight="Bold"/>
-                        </StackPanel>
-
-                    </Border>
-
-                </Grid>
-
-
-                <!-- =================================================
-                     REMEDIATIONS
-                     ================================================= -->
-
-                <TextBlock Text="Azioni di remediation"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           Margin="0,30,0,8"/>
-
-                <TextBlock Text="Azioni generate dal Remediation Engine. Nessuna modifica Azure viene eseguita dalla Fase 6."
-                           Foreground="#687687"
-                           FontSize="12"
-                           Margin="0,0,0,10"/>
-
-                <DataGrid x:Name="RemediationGrid"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          MinHeight="280"
-                          MaxHeight="500"
-                          CanUserAddRows="False"
-                          HeadersVisibility="Column"
-                          GridLinesVisibility="Horizontal">
-
-                    <DataGrid.Columns>
-
-                        <DataGridTextColumn Header="Severity"
-                                            Binding="{Binding Severity}"
-                                            Width="90"/>
-
-                        <DataGridTextColumn Header="Category"
-                                            Binding="{Binding Category}"
-                                            Width="120"/>
-
-                        <DataGridTextColumn Header="Rule"
-                                            Binding="{Binding RuleId}"
-                                            Width="190"/>
-
-                        <DataGridTextColumn Header="Resource"
-                                            Binding="{Binding ResourceName}"
-                                            Width="180"/>
-
-                        <DataGridTextColumn Header="Action"
-                                            Binding="{Binding Action}"
-                                            Width="2*"/>
-
-                        <DataGridTextColumn Header="Status"
-                                            Binding="{Binding Status}"
-                                            Width="140"/>
-
-                        <DataGridTextColumn Header="Command"
-                                            Binding="{Binding Command}"
-                                            Width="2*"/>
-
-                    </DataGrid.Columns>
-
-                </DataGrid>
-
-
-                <!-- =================================================
-                     FINDINGS
-                     ================================================= -->
-
-                <TextBlock Text="Rilievi"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           Margin="0,30,0,8"/>
-
-                <DataGrid x:Name="FindingsGrid"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          MinHeight="350"
-                          MaxHeight="650"
-                          CanUserAddRows="False"
-                          HeadersVisibility="Column"
-                          GridLinesVisibility="Horizontal">
-
-                    <DataGrid.Columns>
-
-                        <DataGridTextColumn Header="Categoria"
-                                            Binding="{Binding Category}"
-                                            Width="120"/>
-
-                        <DataGridTextColumn Header="Gravità"
-                                            Binding="{Binding Severity}"
-                                            Width="90"/>
-
-                        <DataGridTextColumn Header="Rule"
-                                            Binding="{Binding RuleId}"
-                                            Width="190"/>
-
-                        <DataGridTextColumn Header="Titolo"
-                                            Binding="{Binding Title}"
-                                            Width="2*"/>
-
-                        <DataGridTextColumn Header="Risorsa"
-                                            Binding="{Binding ResourceName}"
-                                            Width="180"/>
-
-                        <DataGridTextColumn Header="Tipo risorsa"
-                                            Binding="{Binding ResourceType}"
-                                            Width="240"/>
-
-                        <DataGridTextColumn Header="€/mese"
-                                            Binding="{Binding MonthlySavingEur,StringFormat=N2}"
-                                            Width="100"/>
-
-                    </DataGrid.Columns>
-
-                </DataGrid>
-
-
-                <!-- =================================================
-                     METRICS
-                     ================================================= -->
-
-                <TextBlock Text="Metriche Azure"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           Margin="0,30,0,8"/>
-
-                <TextBlock Text="Metriche raccolte dinamicamente da Azure Monitor per le risorse rilevate."
-                           Foreground="#687687"
-                           FontSize="12"
-                           Margin="0,0,0,10"/>
-
-                <DataGrid x:Name="MetricsGrid"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          MinHeight="350"
-                          MaxHeight="650"
-                          CanUserAddRows="False"
-                          HeadersVisibility="Column"
-                          GridLinesVisibility="Horizontal">
-
-                    <DataGrid.Columns>
-
-                        <DataGridTextColumn Header="Risorsa"
-                                            Binding="{Binding ResourceName}"
-                                            Width="180"/>
-
-                        <DataGridTextColumn Header="Tipo"
-                                            Binding="{Binding ResourceType}"
-                                            Width="240"/>
-
-                        <DataGridTextColumn Header="Metrica"
-                                            Binding="{Binding MetricDisplayName}"
-                                            Width="220"/>
-
-                        <DataGridTextColumn Header="Media"
-                                            Binding="{Binding Average,StringFormat=N2}"
-                                            Width="100"/>
-
-                        <DataGridTextColumn Header="Min"
-                                            Binding="{Binding Minimum,StringFormat=N2}"
-                                            Width="100"/>
-
-                        <DataGridTextColumn Header="Max"
-                                            Binding="{Binding Maximum,StringFormat=N2}"
-                                            Width="100"/>
-
-                        <DataGridTextColumn Header="Campioni"
-                                            Binding="{Binding SampleCount}"
-                                            Width="90"/>
-
-                        <DataGridTextColumn Header="Giorni"
-                                            Binding="{Binding LookbackDays}"
-                                            Width="80"/>
-
-                    </DataGrid.Columns>
-
-                </DataGrid>
+                    </StackPanel>
 
+                </Border>
+
+                <Border x:Name="StatusPanel"
+                        Background="White"
+                        CornerRadius="10"
+                        Padding="20"
+                        BorderBrush="#E1E6EC"
+                        BorderThickness="1"
+                        Margin="0,20,0,0"
+                        Visibility="Collapsed">
+
+                    <StackPanel>
+
+                        <TextBlock Text="Stato assessment"
+                                   FontSize="18"
+                                   FontWeight="SemiBold"/>
+
+                        <TextBlock x:Name="StatusText"
+                                   Text="In attesa..."
+                                   Margin="0,10,0,0"/>
+
+                        <ProgressBar x:Name="Progress"
+                                     Height="8"
+                                     Margin="0,12,0,0"
+                                     Minimum="0"
+                                     Maximum="100"/>
+
+                    </StackPanel>
+
+                </Border>
+
+                <StackPanel x:Name="Results"
+                            Visibility="Collapsed"
+                            Margin="0,25,0,0">
+
+                    <TextBlock Text="Risultati"
+                               FontSize="22"
+                               FontWeight="SemiBold"/>
+
+                    <Grid Margin="0,12,0,20">
+
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition/>
+                            <ColumnDefinition/>
+                            <ColumnDefinition/>
+                            <ColumnDefinition/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border Background="White"
+                                Padding="18"
+                                Margin="0,0,8,0"
+                                CornerRadius="8">
+
+                            <StackPanel>
+
+                                <TextBlock Text="Punteggio"
+                                           Foreground="#667085"/>
+
+                                <TextBlock x:Name="Score"
+                                           FontSize="30"
+                                           FontWeight="Bold"
+                                           Foreground="#087EA4"/>
+
+                            </StackPanel>
+
+                        </Border>
+
+                        <Border Grid.Column="1"
+                                Background="White"
+                                Padding="18"
+                                Margin="8,0"
+                                CornerRadius="8">
+
+                            <StackPanel>
+
+                                <TextBlock Text="Rilievi"
+                                           Foreground="#667085"/>
+
+                                <TextBlock x:Name="FindingCount"
+                                           FontSize="30"
+                                           FontWeight="Bold"/>
+
+                            </StackPanel>
+
+                        </Border>
+
+                        <Border Grid.Column="2"
+                                Background="White"
+                                Padding="18"
+                                Margin="8,0"
+                                CornerRadius="8">
+
+                            <StackPanel>
+
+                                <TextBlock Text="Risparmio / mese"
+                                           Foreground="#667085"/>
+
+                                <TextBlock x:Name="Saving"
+                                           FontSize="30"
+                                           FontWeight="Bold"/>
+
+                            </StackPanel>
+
+                        </Border>
+
+                        <Border Grid.Column="3"
+                                Background="White"
+                                Padding="18"
+                                Margin="8,0"
+                                CornerRadius="8">
+
+                            <StackPanel>
+
+                                <TextBlock Text="Risparmio / anno"
+                                           Foreground="#667085"/>
+
+                                <TextBlock x:Name="SavingYear"
+                                           FontSize="30"
+                                           FontWeight="Bold"/>
+
+                            </StackPanel>
+
+                        </Border>
+
+                    </Grid>
+
+                    <TextBlock Text="Rilievi"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Margin="0,5,0,8"/>
+
+                    <DataGrid x:Name="FindingsGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              MinHeight="350"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal">
+
+                        <DataGrid.Columns>
+
+                            <DataGridTextColumn Header="Categoria"
+                                                Binding="{Binding Category}"
+                                                Width="130"/>
+
+                            <DataGridTextColumn Header="Gravità"
+                                                Binding="{Binding Severity}"
+                                                Width="100"/>
+
+                            <DataGridTextColumn Header="Rule"
+                                                Binding="{Binding RuleId}"
+                                                Width="180"/>
+
+                            <DataGridTextColumn Header="Titolo"
+                                                Binding="{Binding Title}"
+                                                Width="2*"/>
+
+                            <DataGridTextColumn Header="Risorsa"
+                                                Binding="{Binding ResourceName}"
+                                                Width="*"/>
+
+                            <DataGridTextColumn Header="Tipo risorsa"
+                                                Binding="{Binding ResourceType}"
+                                                Width="240"/>
+
+                            <DataGridTextColumn Header="€/mese"
+                                                Binding="{Binding MonthlySavingEur,StringFormat=N2}"
+                                                Width="110"/>
+
+                        </DataGrid.Columns>
+
+                    </DataGrid>
+
+                    <TextBlock Text="Metriche Azure"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Margin="0,30,0,8"/>
+
+                    <TextBlock Text="Metriche raccolte da Azure Monitor per le risorse rilevate."
+                               Foreground="#687687"
+                               FontSize="12"
+                               Margin="0,0,0,10"/>
+
+                    <DataGrid x:Name="MetricsGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              MinHeight="400"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal">
+
+                        <DataGrid.Columns>
+
+                            <DataGridTextColumn Header="Risorsa"
+                                                Binding="{Binding ResourceName}"
+                                                Width="*"/>
+
+                            <DataGridTextColumn Header="Tipo"
+                                                Binding="{Binding ResourceType}"
+                                                Width="240"/>
+
+                            <DataGridTextColumn Header="Metrica"
+                                                Binding="{Binding MetricName}"
+                                                Width="200"/>
+
+                            <DataGridTextColumn Header="Media"
+                                                Binding="{Binding Average,StringFormat=N2}"
+                                                Width="100"/>
+
+                            <DataGridTextColumn Header="Min"
+                                                Binding="{Binding Minimum,StringFormat=N2}"
+                                                Width="100"/>
+
+                            <DataGridTextColumn Header="Max"
+                                                Binding="{Binding Maximum,StringFormat=N2}"
+                                                Width="100"/>
+
+                            <DataGridTextColumn Header="Campioni"
+                                                Binding="{Binding SampleCount}"
+                                                Width="90"/>
+
+                            <DataGridTextColumn Header="Giorni"
+                                                Binding="{Binding LookbackDays}"
+                                                Width="80"/>
+
+                        </DataGrid.Columns>
+
+                    </DataGrid>
+
+                </StackPanel>
 
             </StackPanel>
 
-        </StackPanel>
+        </ScrollViewer>
 
-    </ScrollViewer>
+    </Grid>
 
-</Grid>
 </Window>
