@@ -33,6 +33,10 @@ public static class AssessmentExcelExporter
             workbook,
             document);
 
+        CreateRiskOverviewSheet(
+            workbook,
+            document);
+
         CreateSubscriptionsSheet(
             workbook,
             document);
@@ -171,6 +175,327 @@ public static class AssessmentExcelExporter
                 Math.Max(
                     20,
                     sheet.Column(2).Width));
+    }
+
+    private static void CreateRiskOverviewSheet(
+        XLWorkbook workbook,
+        AssessmentExportDocument document)
+    {
+        var sheet =
+            workbook.Worksheets.Add(
+                "Risk Overview");
+
+        sheet.Cell("A1").Value =
+            "CloudLens Risk Overview";
+
+        sheet.Cell("A1").Style.Font.Bold =
+            true;
+
+        sheet.Cell("A1").Style.Font.FontSize =
+            18;
+
+        sheet.Range("A1:H1")
+            .Merge();
+
+        sheet.Cell("A3").Value =
+            "Severity Overview";
+
+        sheet.Cell("A3").Style.Font.Bold =
+            true;
+
+        var severityHeaders =
+            new[]
+            {
+                "Severity",
+                "Findings"
+            };
+
+        WriteHeader(
+            sheet,
+            severityHeaders,
+            4);
+
+        var severityRow =
+            5;
+
+        foreach (var item in document.Insights.Severity
+                     .OrderBy(
+                         x => SeverityOrder(x.Severity)))
+        {
+            sheet.Cell(severityRow, 1).Value =
+                item.Severity.ToString();
+
+            sheet.Cell(severityRow, 2).Value =
+                item.Count;
+
+            severityRow++;
+        }
+
+        var categoryStartRow =
+            severityRow + 2;
+
+        sheet.Cell(categoryStartRow, 1).Value =
+            "Category Risk Overview";
+
+        sheet.Cell(categoryStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var categoryHeaders =
+            new[]
+            {
+                "Category",
+                "Score",
+                "Findings",
+                "Critical",
+                "High",
+                "Medium",
+                "Low"
+            };
+
+        WriteHeader(
+            sheet,
+            categoryHeaders,
+            categoryStartRow + 1);
+
+        var categoryRow =
+            categoryStartRow + 2;
+
+        foreach (var item in document.Insights.Categories
+                     .OrderBy(
+                         x => x.Score)
+                     .ThenByDescending(
+                         x => x.FindingCount))
+        {
+            sheet.Cell(categoryRow, 1).Value =
+                item.Category.ToString();
+
+            sheet.Cell(categoryRow, 2).Value =
+                item.Score;
+
+            sheet.Cell(categoryRow, 3).Value =
+                item.FindingCount;
+
+            sheet.Cell(categoryRow, 4).Value =
+                item.CriticalCount;
+
+            sheet.Cell(categoryRow, 5).Value =
+                item.HighCount;
+
+            sheet.Cell(categoryRow, 6).Value =
+                item.MediumCount;
+
+            sheet.Cell(categoryRow, 7).Value =
+                item.LowCount;
+
+            categoryRow++;
+        }
+
+        var riskStartRow =
+            categoryRow + 2;
+
+        sheet.Cell(riskStartRow, 1).Value =
+            "Top Risks";
+
+        sheet.Cell(riskStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var riskHeaders =
+            new[]
+            {
+                "Severity",
+                "Category",
+                "Rule",
+                "Title",
+                "Resource",
+                "Resource Type",
+                "Impact",
+                "Recommendation",
+                "Monthly Saving EUR"
+            };
+
+        WriteHeader(
+            sheet,
+            riskHeaders,
+            riskStartRow + 1);
+
+        var riskRow =
+            riskStartRow + 2;
+
+        foreach (var risk in document.Insights.TopRisks)
+        {
+            sheet.Cell(riskRow, 1).Value =
+                risk.Severity.ToString();
+
+            sheet.Cell(riskRow, 2).Value =
+                risk.Category.ToString();
+
+            sheet.Cell(riskRow, 3).Value =
+                risk.RuleId;
+
+            sheet.Cell(riskRow, 4).Value =
+                risk.Title;
+
+            sheet.Cell(riskRow, 5).Value =
+                risk.ResourceName;
+
+            sheet.Cell(riskRow, 6).Value =
+                risk.ResourceType;
+
+            sheet.Cell(riskRow, 7).Value =
+                risk.Impact;
+
+            sheet.Cell(riskRow, 8).Value =
+                risk.Recommendation;
+
+            sheet.Cell(riskRow, 9).Value =
+                risk.MonthlySavingEur;
+
+            sheet.Cell(riskRow, 9)
+                .Style.NumberFormat
+                .Format =
+                "€ #,##0.00";
+
+            riskRow++;
+        }
+
+        var remediationStartRow =
+            riskRow + 2;
+
+        sheet.Cell(remediationStartRow, 1).Value =
+            "Remediation Overview";
+
+        sheet.Cell(remediationStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var remediationHeaders =
+            new[]
+            {
+                "Status",
+                "Actions",
+                "Critical",
+                "High"
+            };
+
+        WriteHeader(
+            sheet,
+            remediationHeaders,
+            remediationStartRow + 1);
+
+        var remediationRow =
+            remediationStartRow + 2;
+
+        foreach (var item in document.Insights.Remediation)
+        {
+            sheet.Cell(remediationRow, 1).Value =
+                GetRemediationStatusLabel(
+                    item.Status);
+
+            sheet.Cell(remediationRow, 2).Value =
+                item.Count;
+
+            sheet.Cell(remediationRow, 3).Value =
+                item.CriticalCount;
+
+            sheet.Cell(remediationRow, 4).Value =
+                item.HighCount;
+
+            remediationRow++;
+        }
+
+        var coverageStartRow =
+            remediationRow + 2;
+
+        sheet.Cell(coverageStartRow, 1).Value =
+            "Assessment Coverage";
+
+        sheet.Cell(coverageStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var coverageHeaders =
+            new[]
+            {
+                "Metric",
+                "Value"
+            };
+
+        WriteHeader(
+            sheet,
+            coverageHeaders,
+            coverageStartRow + 1);
+
+        var coverage =
+            document.Insights.Coverage;
+
+        var coverageRows =
+            new[]
+            {
+                ("Total Resources",
+                    coverage.TotalResources.ToString()),
+
+                ("Enriched Resources",
+                    coverage.EnrichedResources.ToString()),
+
+                ("Enrichment Coverage",
+                    $"{coverage.EnrichmentCoveragePercent:F1}%"),
+
+                ("Total Resource Types",
+                    coverage.TotalResourceTypes.ToString()),
+
+                ("Supported Resource Types",
+                    coverage.SupportedResourceTypes.ToString()),
+
+                ("Generic Resource Types",
+                    coverage.GenericResourceTypes.ToString()),
+
+                ("Unsupported Resource Types",
+                    coverage.UnsupportedResourceTypes.ToString()),
+
+                ("Resource Type Coverage",
+                    $"{coverage.ResourceTypeCoveragePercent:F1}%"),
+
+                ("Specialized Analyzer Coverage",
+                    $"{coverage.SpecializedAnalyzerCoveragePercent:F1}%"),
+
+                ("Metric Capable Resources",
+                    coverage.MetricCapableResources.ToString()),
+
+                ("Metric Profiles",
+                    coverage.MetricProfiles.ToString())
+            };
+
+        var coverageRow =
+            coverageStartRow + 2;
+
+        foreach (var item in coverageRows)
+        {
+            sheet.Cell(coverageRow, 1).Value =
+                item.Item1;
+
+            sheet.Cell(coverageRow, 2).Value =
+                item.Item2;
+
+            coverageRow++;
+        }
+
+        sheet.Columns()
+            .AdjustToContents();
+
+        sheet.Column(1).Width =
+            Math.Min(
+                30,
+                Math.Max(
+                    18,
+                    sheet.Column(1).Width));
+
+        sheet.Column(4).Width = 35;
+        sheet.Column(7).Width = 45;
+        sheet.Column(8).Width = 50;
+
+        sheet.SheetView.FreezeRows(4);
     }
 
     private static void CreateSubscriptionsSheet(
@@ -364,10 +689,17 @@ public static class AssessmentExcelExporter
             row - 1,
             headers.Length);
 
-        sheet.Column(8).Width = 45;
-        sheet.Column(9).Width = 40;
-        sheet.Column(10).Width = 45;
-        sheet.Column(12).Width = 55;
+        sheet.Column(8).Width =
+            45;
+
+        sheet.Column(9).Width =
+            40;
+
+        sheet.Column(10).Width =
+            45;
+
+        sheet.Column(12).Width =
+            55;
     }
 
     private static void CreateRemediationSheet(
@@ -559,19 +891,33 @@ public static class AssessmentExcelExporter
         IXLWorksheet sheet,
         IReadOnlyList<string> headers)
     {
+        WriteHeader(
+            sheet,
+            headers,
+            1);
+    }
+
+    private static void WriteHeader(
+        IXLWorksheet sheet,
+        IReadOnlyList<string> headers,
+        int row)
+    {
         for (var index = 0;
              index < headers.Count;
              index++)
         {
-            sheet.Cell(1, index + 1).Value =
+            sheet.Cell(
+                    row,
+                    index + 1)
+                .Value =
                 headers[index];
         }
 
         StyleHeader(
             sheet.Range(
+                row,
                 1,
-                1,
-                1,
+                row,
                 headers.Count));
     }
 

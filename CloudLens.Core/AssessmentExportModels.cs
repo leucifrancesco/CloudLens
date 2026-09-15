@@ -1,9 +1,10 @@
 using CloudLens.Core.Analysis;
+
 namespace CloudLens.Core;
 
 public sealed class AssessmentExportDocument
 {
-    public string ExportVersion { get; init; } = "1.0";
+    public string ExportVersion { get; init; } = "1.1";
 
     public DateTimeOffset ExportedAt { get; init; }
 
@@ -35,6 +36,8 @@ public sealed class AssessmentExportDocument
 
     public int LowFindings { get; init; }
 
+    public AssessmentExportInsights Insights { get; init; } = new();
+
     public IReadOnlyList<AssessmentExportSubscription>
         Subscriptions { get; init; } = [];
 
@@ -52,7 +55,81 @@ public sealed class AssessmentExportDocument
 
     public IReadOnlyDictionary<Category, int>
         ScoresByCategory { get; init; } =
-            new Dictionary<Category, int>();
+        new Dictionary<Category, int>();
+}
+
+public sealed class AssessmentExportInsights
+{
+    public IReadOnlyList<AssessmentExportSeveritySummary>
+        Severity { get; init; } = [];
+
+    public IReadOnlyList<AssessmentExportCategorySummary>
+        Categories { get; init; } = [];
+
+    public IReadOnlyList<AssessmentExportRiskItem>
+        TopRisks { get; init; } = [];
+
+    public IReadOnlyList<AssessmentExportRemediationSummary>
+        Remediation { get; init; } = [];
+
+    public AssessmentExportCoverageSummary Coverage { get; init; } = new();
+}
+
+public sealed record AssessmentExportSeveritySummary(
+    Severity Severity,
+    int Count);
+
+public sealed record AssessmentExportCategorySummary(
+    Category Category,
+    int Score,
+    int FindingCount,
+    int CriticalCount,
+    int HighCount,
+    int MediumCount,
+    int LowCount);
+
+public sealed record AssessmentExportRiskItem(
+    string FindingId,
+    string RuleId,
+    string Title,
+    Category Category,
+    Severity Severity,
+    string ResourceName,
+    string ResourceType,
+    string? ResourceId,
+    string Impact,
+    string Recommendation,
+    double MonthlySavingEur);
+
+public sealed record AssessmentExportRemediationSummary(
+    RemediationStatus Status,
+    int Count,
+    int CriticalCount,
+    int HighCount);
+
+public sealed class AssessmentExportCoverageSummary
+{
+    public int TotalResources { get; init; }
+
+    public int EnrichedResources { get; init; }
+
+    public double EnrichmentCoveragePercent { get; init; }
+
+    public int TotalResourceTypes { get; init; }
+
+    public int SupportedResourceTypes { get; init; }
+
+    public int GenericResourceTypes { get; init; }
+
+    public int UnsupportedResourceTypes { get; init; }
+
+    public double ResourceTypeCoveragePercent { get; init; }
+
+    public double SpecializedAnalyzerCoveragePercent { get; init; }
+
+    public int MetricCapableResources { get; init; }
+
+    public int MetricProfiles { get; init; }
 }
 
 public sealed record AssessmentExportSubscription(

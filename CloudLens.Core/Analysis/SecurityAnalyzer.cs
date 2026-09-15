@@ -32,29 +32,36 @@ public sealed class SecurityAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         foreach (var nsg in resources.Where(
-                     r => IsType(r, "Microsoft.Network/networkSecurityGroups")))
+                     r => IsType(
+                         r,
+                         "Microsoft.Network/networkSecurityGroups")))
         {
-            var properties = nsg.GetEffectiveProperties();
+            var properties =
+                nsg.GetEffectiveProperties();
 
             if (!properties.HasValue ||
                 !properties.Value.TryGetProperty(
                     "securityRules",
                     out var rules) ||
                 rules.ValueKind != JsonValueKind.Array)
+            {
                 continue;
+            }
 
             foreach (var rule in rules.EnumerateArray())
             {
                 if (!IsInboundAllowRule(rule))
                     continue;
 
-                var source = GetString(
-                    rule,
-                    "sourceAddressPrefix");
+                var source =
+                    GetString(
+                        rule,
+                        "sourceAddressPrefix");
 
-                var sourcePrefixes = GetStringArray(
-                    rule,
-                    "sourceAddressPrefixes");
+                var sourcePrefixes =
+                    GetStringArray(
+                        rule,
+                        "sourceAddressPrefixes");
 
                 var internetExposed =
                     string.Equals(
@@ -76,14 +83,19 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 if (!internetExposed)
                     continue;
 
-                var ports = new List<string>();
+                var ports =
+                    new List<string>();
 
-                var destinationPort = GetString(
-                    rule,
-                    "destinationPortRange");
+                var destinationPort =
+                    GetString(
+                        rule,
+                        "destinationPortRange");
 
-                if (!string.IsNullOrWhiteSpace(destinationPort))
+                if (!string.IsNullOrWhiteSpace(
+                        destinationPort))
+                {
                     ports.Add(destinationPort);
+                }
 
                 ports.AddRange(
                     GetStringArray(
@@ -139,7 +151,9 @@ public sealed class SecurityAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         foreach (var pip in resources.Where(
-                     r => IsType(r, "Microsoft.Network/publicIPAddresses")))
+                     r => IsType(
+                         r,
+                         "Microsoft.Network/publicIPAddresses")))
         {
             if (pip.Relationships.Any())
                 continue;
@@ -161,9 +175,12 @@ public sealed class SecurityAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         foreach (var storage in resources.Where(
-                     r => IsType(r, "Microsoft.Storage/storageAccounts")))
+                     r => IsType(
+                         r,
+                         "Microsoft.Storage/storageAccounts")))
         {
-            var properties = storage.GetEffectiveProperties();
+            var properties =
+                storage.GetEffectiveProperties();
 
             if (!properties.HasValue)
                 continue;
@@ -200,9 +217,10 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     "Abilitare il requisito HTTPS-only.");
             }
 
-            var minimumTls = GetString(
-                properties.Value,
-                "minimumTlsVersion");
+            var minimumTls =
+                GetString(
+                    properties.Value,
+                    "minimumTlsVersion");
 
             if (string.Equals(
                     minimumTls,
@@ -371,17 +389,25 @@ public sealed class SecurityAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         foreach (var sql in resources.Where(
-                     r => IsType(r, "Microsoft.Sql/servers")))
+                     r => IsType(
+                         r,
+                         "Microsoft.Sql/servers")))
         {
-            var properties = sql.GetEffectiveProperties();
+            var properties =
+                sql.GetEffectiveProperties();
 
             if (!properties.HasValue)
                 continue;
 
-            if (GetBool(
+            var publicNetworkAccess =
+                GetString(
                     properties.Value,
-                    "publicNetworkAccess",
-                    true))
+                    "publicNetworkAccess");
+
+            if (string.Equals(
+                    publicNetworkAccess,
+                    "Enabled",
+                    StringComparison.OrdinalIgnoreCase))
             {
                 Add(
                     findings,
@@ -401,9 +427,12 @@ public sealed class SecurityAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         foreach (var app in resources.Where(
-                     r => IsType(r, "Microsoft.Web/sites")))
+                     r => IsType(
+                         r,
+                         "Microsoft.Web/sites")))
         {
-            var properties = app.GetEffectiveProperties();
+            var properties =
+                app.GetEffectiveProperties();
 
             if (!properties.HasValue)
                 continue;
@@ -429,8 +458,15 @@ public sealed class SecurityAnalyzer : IAnalyzer
     private static bool IsInboundAllowRule(
         JsonElement rule)
     {
-        var access = GetString(rule, "access");
-        var direction = GetString(rule, "direction");
+        var access =
+            GetString(
+                rule,
+                "access");
+
+        var direction =
+            GetString(
+                rule,
+                "direction");
 
         return string.Equals(
                    access,
@@ -442,20 +478,27 @@ public sealed class SecurityAnalyzer : IAnalyzer
                    StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsAnyPort(string port)
+    private static bool IsAnyPort(
+        string port)
     {
         return port == "*" ||
                port == "0-65535";
     }
 
-    private static bool ContainsSsh(string port)
+    private static bool ContainsSsh(
+        string port)
     {
-        return ContainsPort(port, 22);
+        return ContainsPort(
+            port,
+            22);
     }
 
-    private static bool ContainsRdp(string port)
+    private static bool ContainsRdp(
+        string port)
     {
-        return ContainsPort(port, 3389);
+        return ContainsPort(
+            port,
+            3389);
     }
 
     private static bool ContainsPort(
@@ -470,18 +513,29 @@ public sealed class SecurityAnalyzer : IAnalyzer
                      StringSplitOptions.RemoveEmptyEntries |
                      StringSplitOptions.TrimEntries))
         {
-            if (int.TryParse(token, out var single) &&
+            if (int.TryParse(
+                    token,
+                    out var single) &&
                 single == port)
+            {
                 return true;
+            }
 
-            var range = token.Split('-');
+            var range =
+                token.Split('-');
 
             if (range.Length == 2 &&
-                int.TryParse(range[0], out var min) &&
-                int.TryParse(range[1], out var max) &&
+                int.TryParse(
+                    range[0],
+                    out var min) &&
+                int.TryParse(
+                    range[1],
+                    out var max) &&
                 port >= min &&
                 port <= max)
+            {
                 return true;
+            }
         }
 
         return false;
@@ -495,7 +549,9 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 name,
                 out var value) ||
             value.ValueKind != JsonValueKind.String)
+        {
             return null;
+        }
 
         return value.GetString();
     }
@@ -508,7 +564,9 @@ public sealed class SecurityAnalyzer : IAnalyzer
         if (!element.TryGetProperty(
                 name,
                 out var value))
+        {
             return defaultValue;
+        }
 
         return value.ValueKind switch
         {
@@ -522,23 +580,29 @@ public sealed class SecurityAnalyzer : IAnalyzer
         JsonElement element,
         string name)
     {
-        var result = new List<string>();
+        var result =
+            new List<string>();
 
         if (!element.TryGetProperty(
                 name,
                 out var array) ||
             array.ValueKind != JsonValueKind.Array)
+        {
             return result;
+        }
 
         foreach (var item in array.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.String)
                 continue;
 
-            var value = item.GetString();
+            var value =
+                item.GetString();
 
             if (!string.IsNullOrWhiteSpace(value))
+            {
                 result.Add(value);
+            }
         }
 
         return result;
@@ -551,7 +615,9 @@ public sealed class SecurityAnalyzer : IAnalyzer
         if (!element.TryGetProperty(
                 name,
                 out var value))
+        {
             return null;
+        }
 
         return value;
     }
@@ -596,16 +662,37 @@ public sealed class SecurityAnalyzer : IAnalyzer
     {
         findings.Add(
             new Finding(
-                Id: $"{ruleId}-{resource.Id}",
-                Category: Category.Security,
-                Severity: severity,
-                RuleId: ruleId,
-                Title: title,
-                Description: description,
-                Impact: impact,
-                Recommendation: recommendation,
-                ResourceName: resource.Name,
-                ResourceType: resource.Type,
-                ResourceId: resource.Id));
+                Id:
+                    $"{ruleId}-{resource.Id}",
+
+                Category:
+                    Category.Security,
+
+                Severity:
+                    severity,
+
+                RuleId:
+                    ruleId,
+
+                Title:
+                    title,
+
+                Description:
+                    description,
+
+                Impact:
+                    impact,
+
+                Recommendation:
+                    recommendation,
+
+                ResourceName:
+                    resource.Name,
+
+                ResourceType:
+                    resource.Type,
+
+                ResourceId:
+                    resource.Id));
     }
 }
