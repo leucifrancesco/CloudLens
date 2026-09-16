@@ -150,6 +150,8 @@ public sealed class TenantScanResult
 
     public List<SubscriptionAssessment> Subscriptions { get; init; } = [];
 
+    public AssessmentIntelligence Intelligence { get; set; } = new();
+
     public IReadOnlyList<AzureResource> AllResources =>
         Subscriptions
             .SelectMany(x => x.Resources)

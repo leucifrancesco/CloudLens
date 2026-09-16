@@ -4,76 +4,124 @@ namespace CloudLens.Core;
 
 public sealed class AssessmentExportDocument
 {
-    public string ExportVersion { get; init; } = "1.1";
-
+    public string ExportVersion { get; init; } = "1.2";
     public DateTimeOffset ExportedAt { get; init; }
-
     public string TenantId { get; init; } = "";
-
     public DateTimeOffset StartedAt { get; init; }
-
     public DateTimeOffset CompletedAt { get; init; }
-
     public int OverallScore { get; init; }
-
     public int TotalResources { get; init; }
-
     public int TotalResourceTypes { get; init; }
-
     public int TotalRelationships { get; init; }
-
     public int EnrichedResources { get; init; }
-
     public double EnrichmentCoveragePercent { get; init; }
-
     public int TotalMetricProfiles { get; init; }
-
     public int CriticalFindings { get; init; }
-
     public int HighFindings { get; init; }
-
     public int MediumFindings { get; init; }
-
     public int LowFindings { get; init; }
 
     public AssessmentExportInsights Insights { get; init; } = new();
 
-    public IReadOnlyList<AssessmentExportSubscription>
-        Subscriptions { get; init; } = [];
+    public AssessmentExportIntelligence Intelligence { get; init; } = new();
 
-    public IReadOnlyList<AssessmentExportResourceType>
-        ResourceInventory { get; init; } = [];
+    public IReadOnlyList<AssessmentExportSubscription> Subscriptions { get; init; } = [];
+    public IReadOnlyList<AssessmentExportResourceType> ResourceInventory { get; init; } = [];
+    public IReadOnlyList<AssessmentExportFinding> Findings { get; init; } = [];
+    public IReadOnlyList<AssessmentExportRemediation> Remediations { get; init; } = [];
+    public IReadOnlyList<AssessmentExportMetric> Metrics { get; init; } = [];
 
-    public IReadOnlyList<AssessmentExportFinding>
-        Findings { get; init; } = [];
-
-    public IReadOnlyList<AssessmentExportRemediation>
-        Remediations { get; init; } = [];
-
-    public IReadOnlyList<AssessmentExportMetric>
-        Metrics { get; init; } = [];
-
-    public IReadOnlyDictionary<Category, int>
-        ScoresByCategory { get; init; } =
+    public IReadOnlyDictionary<Category, int> ScoresByCategory { get; init; } =
         new Dictionary<Category, int>();
 }
 
 public sealed class AssessmentExportInsights
 {
-    public IReadOnlyList<AssessmentExportSeveritySummary>
-        Severity { get; init; } = [];
-
-    public IReadOnlyList<AssessmentExportCategorySummary>
-        Categories { get; init; } = [];
-
-    public IReadOnlyList<AssessmentExportRiskItem>
-        TopRisks { get; init; } = [];
-
-    public IReadOnlyList<AssessmentExportRemediationSummary>
-        Remediation { get; init; } = [];
-
+    public IReadOnlyList<AssessmentExportSeveritySummary> Severity { get; init; } = [];
+    public IReadOnlyList<AssessmentExportCategorySummary> Categories { get; init; } = [];
+    public IReadOnlyList<AssessmentExportRiskItem> TopRisks { get; init; } = [];
+    public IReadOnlyList<AssessmentExportRemediationSummary> Remediation { get; init; } = [];
     public AssessmentExportCoverageSummary Coverage { get; init; } = new();
 }
+
+public sealed class AssessmentExportIntelligence
+{
+    public int TotalRisks { get; init; }
+    public int P0Count { get; init; }
+    public int P1Count { get; init; }
+    public int P2Count { get; init; }
+    public int P3Count { get; init; }
+
+    public int QuickWinCount { get; init; }
+    public int SystemicRiskCount { get; init; }
+
+    public double PotentialMonthlySavingEur { get; init; }
+
+    public IReadOnlyList<AssessmentExportIntelligenceRisk> Risks { get; init; } = [];
+    public IReadOnlyList<AssessmentExportQuickWin> QuickWins { get; init; } = [];
+    public IReadOnlyList<AssessmentExportSystemicRisk> SystemicRisks { get; init; } = [];
+    public IReadOnlyList<AssessmentExportRoadmapItem> Roadmap { get; init; } = [];
+}
+
+public sealed record AssessmentExportIntelligenceRisk(
+    string FindingId,
+    string RuleId,
+    string Title,
+    string ResourceName,
+    string ResourceType,
+    string? ResourceId,
+    Category Category,
+    Severity Severity,
+    AssessmentPriority Priority,
+    IntelligenceClassification Classification,
+    int PriorityScore,
+    int ImpactScore,
+    int EffortScore,
+    bool IsQuickWin,
+    bool IsSystemic,
+    double MonthlySavingEur,
+    string Rationale);
+
+public sealed record AssessmentExportQuickWin(
+    string FindingId,
+    string Title,
+    string ResourceName,
+    string ResourceType,
+    Category Category,
+    Severity Severity,
+    AssessmentPriority Priority,
+    int PriorityScore,
+    int ImpactScore,
+    int EffortScore,
+    double MonthlySavingEur,
+    string Rationale);
+
+public sealed record AssessmentExportSystemicRisk(
+    string Id,
+    string Title,
+    Category Category,
+    Severity Severity,
+    int FindingCount,
+    int AffectedResources,
+    AssessmentPriority Priority,
+    int PriorityScore,
+    string Description,
+    IReadOnlyList<string> FindingIds);
+
+public sealed record AssessmentExportRoadmapItem(
+    string FindingId,
+    string Title,
+    Category Category,
+    Severity Severity,
+    AssessmentPriority Priority,
+    IntelligenceClassification Classification,
+    int PriorityScore,
+    int ImpactScore,
+    int EffortScore,
+    double MonthlySavingEur,
+    string Action,
+    string? Command,
+    bool RequiresReview);
 
 public sealed record AssessmentExportSeveritySummary(
     Severity Severity,
@@ -110,25 +158,15 @@ public sealed record AssessmentExportRemediationSummary(
 public sealed class AssessmentExportCoverageSummary
 {
     public int TotalResources { get; init; }
-
     public int EnrichedResources { get; init; }
-
     public double EnrichmentCoveragePercent { get; init; }
-
     public int TotalResourceTypes { get; init; }
-
     public int SupportedResourceTypes { get; init; }
-
     public int GenericResourceTypes { get; init; }
-
     public int UnsupportedResourceTypes { get; init; }
-
     public double ResourceTypeCoveragePercent { get; init; }
-
     public double SpecializedAnalyzerCoveragePercent { get; init; }
-
     public int MetricCapableResources { get; init; }
-
     public int MetricProfiles { get; init; }
 }
 

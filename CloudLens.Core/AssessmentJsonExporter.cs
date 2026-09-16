@@ -84,52 +84,22 @@ public static class AssessmentJsonExporter
 
         return new AssessmentExportDocument
         {
-            ExportVersion = "1.1",
-
-            ExportedAt =
-                DateTimeOffset.Now,
-
-            TenantId =
-                assessment.TenantId,
-
-            StartedAt =
-                assessment.StartedAt,
-
-            CompletedAt =
-                assessment.CompletedAt,
-
-            OverallScore =
-                assessment.OverallScore,
-
-            TotalResources =
-                assessment.TotalResources,
-
-            TotalResourceTypes =
-                assessment.TotalResourceTypes,
-
-            TotalRelationships =
-                assessment.TotalRelationships,
-
-            EnrichedResources =
-                assessment.EnrichedResources,
-
-            EnrichmentCoveragePercent =
-                assessment.EnrichmentCoveragePercent,
-
-            TotalMetricProfiles =
-                assessment.TotalMetricProfiles,
-
-            CriticalFindings =
-                assessment.CriticalFindings,
-
-            HighFindings =
-                assessment.HighFindings,
-
-            MediumFindings =
-                assessment.MediumFindings,
-
-            LowFindings =
-                assessment.LowFindings,
+            ExportVersion = "1.2",
+            ExportedAt = DateTimeOffset.Now,
+            TenantId = assessment.TenantId,
+            StartedAt = assessment.StartedAt,
+            CompletedAt = assessment.CompletedAt,
+            OverallScore = assessment.OverallScore,
+            TotalResources = assessment.TotalResources,
+            TotalResourceTypes = assessment.TotalResourceTypes,
+            TotalRelationships = assessment.TotalRelationships,
+            EnrichedResources = assessment.EnrichedResources,
+            EnrichmentCoveragePercent = assessment.EnrichmentCoveragePercent,
+            TotalMetricProfiles = assessment.TotalMetricProfiles,
+            CriticalFindings = assessment.CriticalFindings,
+            HighFindings = assessment.HighFindings,
+            MediumFindings = assessment.MediumFindings,
+            LowFindings = assessment.LowFindings,
 
             ScoresByCategory =
                 new Dictionary<Category, int>(
@@ -139,91 +109,89 @@ public static class AssessmentJsonExporter
                 BuildExportInsights(
                     insights),
 
+            Intelligence =
+                BuildExportIntelligence(
+                    assessment.Intelligence),
+
             Subscriptions =
                 assessment.Subscriptions
-                    .Select(
-                        item =>
-                            new AssessmentExportSubscription(
-                                item.Subscription.Name,
-                                item.Subscription.Id,
-                                item.Result.Score,
-                                item.Resources.Count,
-                                item.Result.Stats.ResourceTypes,
-                                item.Result.Findings.Count,
-                                item.Result.Remediation.TotalActions))
+                    .Select(item =>
+                        new AssessmentExportSubscription(
+                            item.Subscription.Name,
+                            item.Subscription.Id,
+                            item.Result.Score,
+                            item.Resources.Count,
+                            item.Result.Stats.ResourceTypes,
+                            item.Result.Findings.Count,
+                            item.Result.Remediation.TotalActions))
                     .ToList(),
 
             ResourceInventory =
                 assessment.ResourceTypes
-                    .Select(
-                        item =>
-                            new AssessmentExportResourceType(
-                                item.ResourceType,
-                                item.Count))
+                    .Select(item =>
+                        new AssessmentExportResourceType(
+                            item.ResourceType,
+                            item.Count))
                     .ToList(),
 
             Findings =
                 assessment.AllFindings
-                    .Select(
-                        finding =>
-                            new AssessmentExportFinding(
-                                finding.Id,
-                                finding.Category,
-                                finding.Severity,
-                                finding.RuleId,
-                                finding.Title,
-                                finding.Description,
-                                finding.Impact,
-                                finding.Recommendation,
-                                finding.ResourceName,
-                                finding.ResourceType,
-                                finding.MonthlySavingEur,
-                                finding.ResourceId,
-                                finding.AzureCli))
+                    .Select(finding =>
+                        new AssessmentExportFinding(
+                            finding.Id,
+                            finding.Category,
+                            finding.Severity,
+                            finding.RuleId,
+                            finding.Title,
+                            finding.Description,
+                            finding.Impact,
+                            finding.Recommendation,
+                            finding.ResourceName,
+                            finding.ResourceType,
+                            finding.MonthlySavingEur,
+                            finding.ResourceId,
+                            finding.AzureCli))
                     .ToList(),
 
             Remediations =
                 assessment.Subscriptions
                     .SelectMany(
-                        item =>
-                            item.Result.Remediation.Actions)
-                    .Select(
-                        action =>
-                            new AssessmentExportRemediation(
-                                action.Id,
-                                action.FindingId,
-                                action.RuleId,
-                                action.Category,
-                                action.Severity,
-                                action.Title,
-                                action.Description,
-                                action.ResourceName,
-                                action.ResourceType,
-                                action.ResourceId,
-                                action.ActionType,
-                                action.Status,
-                                action.Action,
-                                action.Command,
-                                action.RequiresReview))
+                        item => item.Result.Remediation.Actions)
+                    .Select(action =>
+                        new AssessmentExportRemediation(
+                            action.Id,
+                            action.FindingId,
+                            action.RuleId,
+                            action.Category,
+                            action.Severity,
+                            action.Title,
+                            action.Description,
+                            action.ResourceName,
+                            action.ResourceType,
+                            action.ResourceId,
+                            action.ActionType,
+                            action.Status,
+                            action.Action,
+                            action.Command,
+                            action.RequiresReview))
                     .ToList(),
 
             Metrics =
                 assessment.AllMetricProfiles
-                    .Select(
-                        metric =>
-                            new AssessmentExportMetric(
-                                metric.ResourceId,
-                                metric.ResourceName,
-                                metric.ResourceType,
-                                metric.MetricName,
-                                metric.MetricDisplayName,
-                                metric.Unit,
-                                metric.MetricNamespace,
-                                metric.Average,
-                                metric.Minimum,
-                                metric.Maximum,
-                                metric.SampleCount,
-                                metric.LookbackDays))
+                    .Select(metric =>
+                        new AssessmentExportMetric(
+                            metric.ResourceId,
+                            metric.ResourceName,
+                            metric.ResourceType,
+                            metric.MetricName,
+                            metric.MetricDisplayName,
+                            metric.Unit,
+                            metric.MetricNamespace,
+                            metric.Average,
+                            metric.Minimum,
+                            metric.Maximum,
+                            metric.SampleCount,
+                            metric.LookbackDays))
                     .ToList()
         };
     }
@@ -236,54 +204,50 @@ public static class AssessmentJsonExporter
         {
             Severity =
                 insights.Severity
-                    .Select(
-                        item =>
-                            new AssessmentExportSeveritySummary(
-                                item.Severity,
-                                item.Count))
+                    .Select(item =>
+                        new AssessmentExportSeveritySummary(
+                            item.Severity,
+                            item.Count))
                     .ToList(),
 
             Categories =
                 insights.Categories
-                    .Select(
-                        item =>
-                            new AssessmentExportCategorySummary(
-                                item.Category,
-                                item.Score,
-                                item.FindingCount,
-                                item.CriticalCount,
-                                item.HighCount,
-                                item.MediumCount,
-                                item.LowCount))
+                    .Select(item =>
+                        new AssessmentExportCategorySummary(
+                            item.Category,
+                            item.Score,
+                            item.FindingCount,
+                            item.CriticalCount,
+                            item.HighCount,
+                            item.MediumCount,
+                            item.LowCount))
                     .ToList(),
 
             TopRisks =
                 insights.TopRisks
-                    .Select(
-                        item =>
-                            new AssessmentExportRiskItem(
-                                item.FindingId,
-                                item.RuleId,
-                                item.Title,
-                                item.Category,
-                                item.Severity,
-                                item.ResourceName,
-                                item.ResourceType,
-                                item.ResourceId,
-                                item.Impact,
-                                item.Recommendation,
-                                item.MonthlySavingEur))
+                    .Select(item =>
+                        new AssessmentExportRiskItem(
+                            item.FindingId,
+                            item.RuleId,
+                            item.Title,
+                            item.Category,
+                            item.Severity,
+                            item.ResourceName,
+                            item.ResourceType,
+                            item.ResourceId,
+                            item.Impact,
+                            item.Recommendation,
+                            item.MonthlySavingEur))
                     .ToList(),
 
             Remediation =
                 insights.Remediation
-                    .Select(
-                        item =>
-                            new AssessmentExportRemediationSummary(
-                                item.Status,
-                                item.Count,
-                                item.CriticalCount,
-                                item.HighCount))
+                    .Select(item =>
+                        new AssessmentExportRemediationSummary(
+                            item.Status,
+                            item.Count,
+                            item.CriticalCount,
+                            item.HighCount))
                     .ToList(),
 
             Coverage =
@@ -322,6 +286,114 @@ public static class AssessmentJsonExporter
                     MetricProfiles =
                         insights.Coverage.MetricProfiles
                 }
+        };
+    }
+
+    private static AssessmentExportIntelligence
+        BuildExportIntelligence(
+            AssessmentIntelligence intelligence)
+    {
+        return new AssessmentExportIntelligence
+        {
+            TotalRisks =
+                intelligence.TotalRisks,
+
+            P0Count =
+                intelligence.P0Count,
+
+            P1Count =
+                intelligence.P1Count,
+
+            P2Count =
+                intelligence.P2Count,
+
+            P3Count =
+                intelligence.P3Count,
+
+            QuickWinCount =
+                intelligence.QuickWinCount,
+
+            SystemicRiskCount =
+                intelligence.SystemicRiskCount,
+
+            PotentialMonthlySavingEur =
+                intelligence.PotentialMonthlySavingEur,
+
+            Risks =
+                intelligence.Risks
+                    .Select(item =>
+                        new AssessmentExportIntelligenceRisk(
+                            item.FindingId,
+                            item.RuleId,
+                            item.Title,
+                            item.ResourceName,
+                            item.ResourceType,
+                            item.ResourceId,
+                            item.Category,
+                            item.Severity,
+                            item.Priority,
+                            item.Classification,
+                            item.PriorityScore,
+                            item.ImpactScore,
+                            item.EffortScore,
+                            item.IsQuickWin,
+                            item.IsSystemic,
+                            item.MonthlySavingEur,
+                            item.Rationale))
+                    .ToList(),
+
+            QuickWins =
+                intelligence.QuickWins
+                    .Select(item =>
+                        new AssessmentExportQuickWin(
+                            item.FindingId,
+                            item.Title,
+                            item.ResourceName,
+                            item.ResourceType,
+                            item.Category,
+                            item.Severity,
+                            item.Priority,
+                            item.PriorityScore,
+                            item.ImpactScore,
+                            item.EffortScore,
+                            item.MonthlySavingEur,
+                            item.Rationale))
+                    .ToList(),
+
+            SystemicRisks =
+                intelligence.SystemicRisks
+                    .Select(item =>
+                        new AssessmentExportSystemicRisk(
+                            item.Id,
+                            item.Title,
+                            item.Category,
+                            item.Severity,
+                            item.FindingCount,
+                            item.AffectedResources,
+                            item.Priority,
+                            item.PriorityScore,
+                            item.Description,
+                            item.FindingIds))
+                    .ToList(),
+
+            Roadmap =
+                intelligence.Roadmap
+                    .Select(item =>
+                        new AssessmentExportRoadmapItem(
+                            item.FindingId,
+                            item.Title,
+                            item.Category,
+                            item.Severity,
+                            item.Priority,
+                            item.Classification,
+                            item.PriorityScore,
+                            item.ImpactScore,
+                            item.EffortScore,
+                            item.MonthlySavingEur,
+                            item.Action,
+                            item.Command,
+                            item.RequiresReview))
+                    .ToList()
         };
     }
 }

@@ -37,6 +37,10 @@ public static class AssessmentExcelExporter
             workbook,
             document);
 
+        CreateIntelligenceSheet(
+            workbook,
+            document);
+
         CreateSubscriptionsSheet(
             workbook,
             document);
@@ -100,7 +104,17 @@ public static class AssessmentExcelExporter
                 ("Medium Findings", document.MediumFindings.ToString()),
                 ("Low Findings", document.LowFindings.ToString()),
                 ("Total Findings", document.Findings.Count.ToString()),
-                ("Total Remediations", document.Remediations.Count.ToString())
+                ("Total Remediations", document.Remediations.Count.ToString()),
+                ("Intelligence Risks", document.Intelligence.TotalRisks.ToString()),
+                ("P0 Risks", document.Intelligence.P0Count.ToString()),
+                ("P1 Risks", document.Intelligence.P1Count.ToString()),
+                ("P2 Risks", document.Intelligence.P2Count.ToString()),
+                ("P3 Risks", document.Intelligence.P3Count.ToString()),
+                ("Quick Wins", document.Intelligence.QuickWinCount.ToString()),
+                ("Systemic Risks", document.Intelligence.SystemicRiskCount.ToString()),
+                ("Potential Monthly Saving EUR",
+                    document.Intelligence.PotentialMonthlySavingEur
+                        .ToString("F2"))
             };
 
         sheet.Cell("A3").Value =
@@ -494,6 +508,430 @@ public static class AssessmentExcelExporter
         sheet.Column(4).Width = 35;
         sheet.Column(7).Width = 45;
         sheet.Column(8).Width = 50;
+
+        sheet.SheetView.FreezeRows(4);
+    }
+
+    private static void CreateIntelligenceSheet(
+        XLWorkbook workbook,
+        AssessmentExportDocument document)
+    {
+        var sheet =
+            workbook.Worksheets.Add(
+                "Intelligence");
+
+        sheet.Cell("A1").Value =
+            "CloudLens Assessment Intelligence";
+
+        sheet.Cell("A1").Style.Font.Bold =
+            true;
+
+        sheet.Cell("A1").Style.Font.FontSize =
+            18;
+
+        sheet.Range("A1:J1")
+            .Merge();
+
+        var summaryRows =
+            new[]
+            {
+                ("Total Risks",
+                    document.Intelligence.TotalRisks.ToString()),
+
+                ("P0 Risks",
+                    document.Intelligence.P0Count.ToString()),
+
+                ("P1 Risks",
+                    document.Intelligence.P1Count.ToString()),
+
+                ("P2 Risks",
+                    document.Intelligence.P2Count.ToString()),
+
+                ("P3 Risks",
+                    document.Intelligence.P3Count.ToString()),
+
+                ("Quick Wins",
+                    document.Intelligence.QuickWinCount.ToString()),
+
+                ("Systemic Risks",
+                    document.Intelligence.SystemicRiskCount.ToString()),
+
+                ("Potential Monthly Saving EUR",
+                    document.Intelligence.PotentialMonthlySavingEur
+                        .ToString("F2"))
+            };
+
+        sheet.Cell("A3").Value =
+            "Intelligence Summary";
+
+        sheet.Cell("A3").Style.Font.Bold =
+            true;
+
+        WriteHeader(
+            sheet,
+            new[]
+            {
+                "Metric",
+                "Value"
+            },
+            4);
+
+        var summaryRow = 5;
+
+        foreach (var item in summaryRows)
+        {
+            sheet.Cell(summaryRow, 1).Value =
+                item.Item1;
+
+            sheet.Cell(summaryRow, 2).Value =
+                item.Item2;
+
+            summaryRow++;
+        }
+
+        var riskStartRow =
+            summaryRow + 2;
+
+        sheet.Cell(riskStartRow, 1).Value =
+            "Prioritized Risks";
+
+        sheet.Cell(riskStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var riskHeaders =
+            new[]
+            {
+                "Priority",
+                "Score",
+                "Classification",
+                "Severity",
+                "Category",
+                "Rule",
+                "Title",
+                "Resource",
+                "Resource Type",
+                "Impact",
+                "Effort",
+                "Quick Win",
+                "Systemic",
+                "Monthly Saving EUR",
+                "Rationale"
+            };
+
+        WriteHeader(
+            sheet,
+            riskHeaders,
+            riskStartRow + 1);
+
+        var riskRow =
+            riskStartRow + 2;
+
+        foreach (var risk in document.Intelligence.Risks
+                     .OrderBy(x => x.Priority)
+                     .ThenByDescending(x => x.PriorityScore))
+        {
+            sheet.Cell(riskRow, 1).Value =
+                risk.Priority.ToString();
+
+            sheet.Cell(riskRow, 2).Value =
+                risk.PriorityScore;
+
+            sheet.Cell(riskRow, 3).Value =
+                risk.Classification.ToString();
+
+            sheet.Cell(riskRow, 4).Value =
+                risk.Severity.ToString();
+
+            sheet.Cell(riskRow, 5).Value =
+                risk.Category.ToString();
+
+            sheet.Cell(riskRow, 6).Value =
+                risk.RuleId;
+
+            sheet.Cell(riskRow, 7).Value =
+                risk.Title;
+
+            sheet.Cell(riskRow, 8).Value =
+                risk.ResourceName;
+
+            sheet.Cell(riskRow, 9).Value =
+                risk.ResourceType;
+
+            sheet.Cell(riskRow, 10).Value =
+                risk.ImpactScore;
+
+            sheet.Cell(riskRow, 11).Value =
+                risk.EffortScore;
+
+            sheet.Cell(riskRow, 12).Value =
+                risk.IsQuickWin;
+
+            sheet.Cell(riskRow, 13).Value =
+                risk.IsSystemic;
+
+            sheet.Cell(riskRow, 14).Value =
+                risk.MonthlySavingEur;
+
+            sheet.Cell(riskRow, 14)
+                .Style.NumberFormat
+                .Format =
+                "€ #,##0.00";
+
+            sheet.Cell(riskRow, 15).Value =
+                risk.Rationale;
+
+            riskRow++;
+        }
+
+        var quickWinStartRow =
+            riskRow + 2;
+
+        sheet.Cell(quickWinStartRow, 1).Value =
+            "Quick Wins";
+
+        sheet.Cell(quickWinStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var quickWinHeaders =
+            new[]
+            {
+                "Priority",
+                "Score",
+                "Severity",
+                "Category",
+                "Title",
+                "Resource",
+                "Resource Type",
+                "Impact",
+                "Effort",
+                "Monthly Saving EUR",
+                "Rationale"
+            };
+
+        WriteHeader(
+            sheet,
+            quickWinHeaders,
+            quickWinStartRow + 1);
+
+        var quickWinRow =
+            quickWinStartRow + 2;
+
+        foreach (var item in document.Intelligence.QuickWins
+                     .OrderBy(x => x.Priority)
+                     .ThenByDescending(x => x.PriorityScore))
+        {
+            sheet.Cell(quickWinRow, 1).Value =
+                item.Priority.ToString();
+
+            sheet.Cell(quickWinRow, 2).Value =
+                item.PriorityScore;
+
+            sheet.Cell(quickWinRow, 3).Value =
+                item.Severity.ToString();
+
+            sheet.Cell(quickWinRow, 4).Value =
+                item.Category.ToString();
+
+            sheet.Cell(quickWinRow, 5).Value =
+                item.Title;
+
+            sheet.Cell(quickWinRow, 6).Value =
+                item.ResourceName;
+
+            sheet.Cell(quickWinRow, 7).Value =
+                item.ResourceType;
+
+            sheet.Cell(quickWinRow, 8).Value =
+                item.ImpactScore;
+
+            sheet.Cell(quickWinRow, 9).Value =
+                item.EffortScore;
+
+            sheet.Cell(quickWinRow, 10).Value =
+                item.MonthlySavingEur;
+
+            sheet.Cell(quickWinRow, 10)
+                .Style.NumberFormat
+                .Format =
+                "€ #,##0.00";
+
+            sheet.Cell(quickWinRow, 11).Value =
+                item.Rationale;
+
+            quickWinRow++;
+        }
+
+        var systemicStartRow =
+            quickWinRow + 2;
+
+        sheet.Cell(systemicStartRow, 1).Value =
+            "Systemic Risks";
+
+        sheet.Cell(systemicStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var systemicHeaders =
+            new[]
+            {
+                "Priority",
+                "Score",
+                "Severity",
+                "Category",
+                "Title",
+                "Findings",
+                "Affected Resources",
+                "Description",
+                "Finding IDs"
+            };
+
+        WriteHeader(
+            sheet,
+            systemicHeaders,
+            systemicStartRow + 1);
+
+        var systemicRow =
+            systemicStartRow + 2;
+
+        foreach (var item in document.Intelligence.SystemicRisks
+                     .OrderBy(x => x.Priority)
+                     .ThenByDescending(x => x.PriorityScore))
+        {
+            sheet.Cell(systemicRow, 1).Value =
+                item.Priority.ToString();
+
+            sheet.Cell(systemicRow, 2).Value =
+                item.PriorityScore;
+
+            sheet.Cell(systemicRow, 3).Value =
+                item.Severity.ToString();
+
+            sheet.Cell(systemicRow, 4).Value =
+                item.Category.ToString();
+
+            sheet.Cell(systemicRow, 5).Value =
+                item.Title;
+
+            sheet.Cell(systemicRow, 6).Value =
+                item.FindingCount;
+
+            sheet.Cell(systemicRow, 7).Value =
+                item.AffectedResources;
+
+            sheet.Cell(systemicRow, 8).Value =
+                item.Description;
+
+            sheet.Cell(systemicRow, 9).Value =
+                string.Join(
+                    ", ",
+                    item.FindingIds);
+
+            systemicRow++;
+        }
+
+        var roadmapStartRow =
+            systemicRow + 2;
+
+        sheet.Cell(roadmapStartRow, 1).Value =
+            "Remediation Roadmap";
+
+        sheet.Cell(roadmapStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var roadmapHeaders =
+            new[]
+            {
+                "Priority",
+                "Score",
+                "Classification",
+                "Severity",
+                "Category",
+                "Title",
+                "Impact",
+                "Effort",
+                "Monthly Saving EUR",
+                "Action",
+                "Command",
+                "Requires Review"
+            };
+
+        WriteHeader(
+            sheet,
+            roadmapHeaders,
+            roadmapStartRow + 1);
+
+        var roadmapRow =
+            roadmapStartRow + 2;
+
+        foreach (var item in document.Intelligence.Roadmap
+                     .OrderBy(x => x.Priority)
+                     .ThenByDescending(x => x.PriorityScore))
+        {
+            sheet.Cell(roadmapRow, 1).Value =
+                item.Priority.ToString();
+
+            sheet.Cell(roadmapRow, 2).Value =
+                item.PriorityScore;
+
+            sheet.Cell(roadmapRow, 3).Value =
+                item.Classification.ToString();
+
+            sheet.Cell(roadmapRow, 4).Value =
+                item.Severity.ToString();
+
+            sheet.Cell(roadmapRow, 5).Value =
+                item.Category.ToString();
+
+            sheet.Cell(roadmapRow, 6).Value =
+                item.Title;
+
+            sheet.Cell(roadmapRow, 7).Value =
+                item.ImpactScore;
+
+            sheet.Cell(roadmapRow, 8).Value =
+                item.EffortScore;
+
+            sheet.Cell(roadmapRow, 9).Value =
+                item.MonthlySavingEur;
+
+            sheet.Cell(roadmapRow, 9)
+                .Style.NumberFormat
+                .Format =
+                "€ #,##0.00";
+
+            sheet.Cell(roadmapRow, 10).Value =
+                item.Action;
+
+            sheet.Cell(roadmapRow, 11).Value =
+                item.Command ?? "";
+
+            sheet.Cell(roadmapRow, 12).Value =
+                item.RequiresReview;
+
+            roadmapRow++;
+        }
+
+        sheet.Columns()
+            .AdjustToContents();
+
+        sheet.Column(1).Width = 15;
+        sheet.Column(2).Width = 12;
+        sheet.Column(3).Width = 22;
+        sheet.Column(4).Width = 15;
+        sheet.Column(5).Width = 18;
+        sheet.Column(6).Width = 40;
+        sheet.Column(7).Width = 40;
+        sheet.Column(8).Width = 35;
+        sheet.Column(9).Width = 22;
+        sheet.Column(10).Width = 45;
+        sheet.Column(11).Width = 60;
+        sheet.Column(12).Width = 18;
+        sheet.Column(13).Width = 15;
+        sheet.Column(14).Width = 22;
+        sheet.Column(15).Width = 55;
 
         sheet.SheetView.FreezeRows(4);
     }
