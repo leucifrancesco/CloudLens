@@ -39,6 +39,8 @@ public partial class MainWindow : Window
             "Accedere prima con Microsoft");
 
         Subscription.SelectedIndex = 0;
+
+        ClearIntelligence();
     }
 
     private void Demo_Click(
@@ -594,6 +596,8 @@ public partial class MainWindow : Window
         MetricsGrid.ItemsSource =
             result.MetricProfiles;
 
+        ClearIntelligence();
+
         ExportReportButton.IsEnabled =
             false;
 
@@ -639,6 +643,9 @@ public partial class MainWindow : Window
         MetricsGrid.ItemsSource =
             result.AllMetricProfiles;
 
+        LoadIntelligence(
+            result.Intelligence);
+
         ExportReportButton.IsEnabled =
             true;
 
@@ -647,5 +654,72 @@ public partial class MainWindow : Window
 
         ExportExcelButton.IsEnabled =
             true;
+    }
+
+    private void LoadIntelligence(
+        CloudLens.Core.Analysis.AssessmentIntelligence intelligence)
+    {
+        IntelligenceTotalRisks.Text =
+            intelligence.TotalRisks.ToString();
+
+        IntelligenceP0.Text =
+            intelligence.P0Count.ToString();
+
+        IntelligenceP1.Text =
+            intelligence.P1Count.ToString();
+
+        IntelligenceP2.Text =
+            intelligence.P2Count.ToString();
+
+        IntelligenceP3.Text =
+            intelligence.P3Count.ToString();
+
+        IntelligenceSaving.Text =
+            $"€ {intelligence.PotentialMonthlySavingEur:N2}";
+
+        QuickWinsGrid.ItemsSource =
+            intelligence.QuickWins;
+
+        SystemicRisksGrid.ItemsSource =
+            intelligence.SystemicRisks;
+
+        PrioritizedRisksGrid.ItemsSource =
+            intelligence.Risks;
+
+        RoadmapGrid.ItemsSource =
+            intelligence.Roadmap;
+    }
+
+    private void ClearIntelligence()
+    {
+        IntelligenceTotalRisks.Text =
+            "0";
+
+        IntelligenceP0.Text =
+            "0";
+
+        IntelligenceP1.Text =
+            "0";
+
+        IntelligenceP2.Text =
+            "0";
+
+        IntelligenceP3.Text =
+            "0";
+
+        IntelligenceSaving.Text =
+            "€ 0.00";
+
+        QuickWinsGrid.ItemsSource =
+            null;
+
+        SystemicRisksGrid.ItemsSource =
+            null;
+
+        PrioritizedRisksGrid.ItemsSource =
+            null;
+
+        RoadmapGrid.ItemsSource =
+            null;
     }
 }

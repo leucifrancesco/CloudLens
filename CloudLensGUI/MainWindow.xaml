@@ -16,6 +16,8 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
+        <!-- Header -->
+
         <Border Background="#0D1524">
 
             <DockPanel Margin="28,0">
@@ -36,11 +38,15 @@
 
         </Border>
 
+        <!-- Main content -->
+
         <ScrollViewer Grid.Row="1"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
 
             <StackPanel Margin="36">
+
+                <!-- Title -->
 
                 <StackPanel Orientation="Horizontal">
 
@@ -63,6 +69,8 @@
                             VerticalAlignment="Center"/>
 
                 </StackPanel>
+
+                <!-- Azure connection -->
 
                 <Border Background="White"
                         CornerRadius="10"
@@ -118,6 +126,8 @@
                     </StackPanel>
 
                 </Border>
+
+                <!-- Assessment configuration -->
 
                 <Border Background="White"
                         CornerRadius="10"
@@ -201,6 +211,8 @@
 
                 </Border>
 
+                <!-- Status -->
+
                 <Border x:Name="StatusPanel"
                         Background="White"
                         CornerRadius="10"
@@ -230,6 +242,8 @@
 
                 </Border>
 
+                <!-- Results -->
+
                 <StackPanel x:Name="Results"
                             Visibility="Collapsed"
                             Margin="0,25,0,0">
@@ -237,6 +251,8 @@
                     <TextBlock Text="Risultati"
                                FontSize="22"
                                FontWeight="SemiBold"/>
+
+                    <!-- Executive metrics -->
 
                     <Grid Margin="0,12,0,20">
 
@@ -325,6 +341,395 @@
 
                     </Grid>
 
+                    <!-- Assessment Intelligence -->
+
+                    <Border Background="White"
+                            CornerRadius="10"
+                            Padding="24"
+                            BorderBrush="#E1E6EC"
+                            BorderThickness="1"
+                            Margin="0,0,0,25">
+
+                        <StackPanel>
+
+                            <TextBlock Text="Assessment Intelligence"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"/>
+
+                            <TextBlock Text="Prioritizzazione dei rischi, quick wins, rischi sistemici e roadmap di remediation."
+                                       Foreground="#687687"
+                                       FontSize="12"
+                                       Margin="0,5,0,18"/>
+
+                            <!-- Intelligence summary cards -->
+
+                            <Grid Margin="0,0,0,22">
+
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/>
+                                    <ColumnDefinition/>
+                                    <ColumnDefinition/>
+                                    <ColumnDefinition/>
+                                    <ColumnDefinition/>
+                                    <ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+
+                                <Border Background="#F8FAFC"
+                                        BorderBrush="#E1E6EC"
+                                        BorderThickness="1"
+                                        CornerRadius="7"
+                                        Padding="14"
+                                        Margin="0,0,6,0">
+
+                                    <StackPanel>
+
+                                        <TextBlock Text="Rischi totali"
+                                                   Foreground="#667085"
+                                                   FontSize="12"/>
+
+                                        <TextBlock x:Name="IntelligenceTotalRisks"
+                                                   FontSize="24"
+                                                   FontWeight="Bold"
+                                                   Margin="0,3,0,0"/>
+
+                                    </StackPanel>
+
+                                </Border>
+
+                                <Border Grid.Column="1"
+                                        Background="#F8FAFC"
+                                        BorderBrush="#E1E6EC"
+                                        BorderThickness="1"
+                                        CornerRadius="7"
+                                        Padding="14"
+                                        Margin="6,0">
+
+                                    <StackPanel>
+
+                                        <TextBlock Text="P0"
+                                                   Foreground="#667085"
+                                                   FontSize="12"/>
+
+                                        <TextBlock x:Name="IntelligenceP0"
+                                                   FontSize="24"
+                                                   FontWeight="Bold"
+                                                   Margin="0,3,0,0"/>
+
+                                    </StackPanel>
+
+                                </Border>
+
+                                <Border Grid.Column="2"
+                                        Background="#F8FAFC"
+                                        BorderBrush="#E1E6EC"
+                                        BorderThickness="1"
+                                        CornerRadius="7"
+                                        Padding="14"
+                                        Margin="6,0">
+
+                                    <StackPanel>
+
+                                        <TextBlock Text="P1"
+                                                   Foreground="#667085"
+                                                   FontSize="12"/>
+
+                                        <TextBlock x:Name="IntelligenceP1"
+                                                   FontSize="24"
+                                                   FontWeight="Bold"
+                                                   Margin="0,3,0,0"/>
+
+                                    </StackPanel>
+
+                                </Border>
+
+                                <Border Grid.Column="3"
+                                        Background="#F8FAFC"
+                                        BorderBrush="#E1E6EC"
+                                        BorderThickness="1"
+                                        CornerRadius="7"
+                                        Padding="14"
+                                        Margin="6,0">
+
+                                    <StackPanel>
+
+                                        <TextBlock Text="P2"
+                                                   Foreground="#667085"
+                                                   FontSize="12"/>
+
+                                        <TextBlock x:Name="IntelligenceP2"
+                                                   FontSize="24"
+                                                   FontWeight="Bold"
+                                                   Margin="0,3,0,0"/>
+
+                                    </StackPanel>
+
+                                </Border>
+
+                                <Border Grid.Column="4"
+                                        Background="#F8FAFC"
+                                        BorderBrush="#E1E6EC"
+                                        BorderThickness="1"
+                                        CornerRadius="7"
+                                        Padding="14"
+                                        Margin="6,0">
+
+                                    <StackPanel>
+
+                                        <TextBlock Text="P3"
+                                                   Foreground="#667085"
+                                                   FontSize="12"/>
+
+                                        <TextBlock x:Name="IntelligenceP3"
+                                                   FontSize="24"
+                                                   FontWeight="Bold"
+                                                   Margin="0,3,0,0"/>
+
+                                    </StackPanel>
+
+                                </Border>
+
+                                <Border Grid.Column="5"
+                                        Background="#F8FAFC"
+                                        BorderBrush="#E1E6EC"
+                                        BorderThickness="1"
+                                        CornerRadius="7"
+                                        Padding="14"
+                                        Margin="6,0,0,0">
+
+                                    <StackPanel>
+
+                                        <TextBlock Text="Saving / mese"
+                                                   Foreground="#667085"
+                                                   FontSize="12"/>
+
+                                        <TextBlock x:Name="IntelligenceSaving"
+                                                   FontSize="24"
+                                                   FontWeight="Bold"
+                                                   Margin="0,3,0,0"/>
+
+                                    </StackPanel>
+
+                                </Border>
+
+                            </Grid>
+
+                            <!-- Quick wins -->
+
+                            <TextBlock Text="Quick Wins"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,8"/>
+
+                            <DataGrid x:Name="QuickWinsGrid"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      MinHeight="130"
+                                      MaxHeight="280"
+                                      CanUserAddRows="False"
+                                      HeadersVisibility="Column"
+                                      GridLinesVisibility="Horizontal"
+                                      Margin="0,0,0,22">
+
+                                <DataGrid.Columns>
+
+                                    <DataGridTextColumn Header="Priorità"
+                                                        Binding="{Binding Priority}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Categoria"
+                                                        Binding="{Binding Category}"
+                                                        Width="120"/>
+
+                                    <DataGridTextColumn Header="Gravità"
+                                                        Binding="{Binding Severity}"
+                                                        Width="90"/>
+
+                                    <DataGridTextColumn Header="Titolo"
+                                                        Binding="{Binding Title}"
+                                                        Width="2*"/>
+
+                                    <DataGridTextColumn Header="Risorsa"
+                                                        Binding="{Binding ResourceName}"
+                                                        Width="*"/>
+
+                                    <DataGridTextColumn Header="Score"
+                                                        Binding="{Binding PriorityScore}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="€/mese"
+                                                        Binding="{Binding MonthlySavingEur,StringFormat=N2}"
+                                                        Width="100"/>
+
+                                </DataGrid.Columns>
+
+                            </DataGrid>
+
+                            <!-- Systemic risks -->
+
+                            <TextBlock Text="Systemic Risks"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,8"/>
+
+                            <DataGrid x:Name="SystemicRisksGrid"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      MinHeight="130"
+                                      MaxHeight="280"
+                                      CanUserAddRows="False"
+                                      HeadersVisibility="Column"
+                                      GridLinesVisibility="Horizontal"
+                                      Margin="0,0,0,22">
+
+                                <DataGrid.Columns>
+
+                                    <DataGridTextColumn Header="Priorità"
+                                                        Binding="{Binding Priority}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Categoria"
+                                                        Binding="{Binding Category}"
+                                                        Width="120"/>
+
+                                    <DataGridTextColumn Header="Gravità"
+                                                        Binding="{Binding Severity}"
+                                                        Width="90"/>
+
+                                    <DataGridTextColumn Header="Titolo"
+                                                        Binding="{Binding Title}"
+                                                        Width="2*"/>
+
+                                    <DataGridTextColumn Header="Finding"
+                                                        Binding="{Binding FindingCount}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Risorse"
+                                                        Binding="{Binding AffectedResources}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Score"
+                                                        Binding="{Binding PriorityScore}"
+                                                        Width="80"/>
+
+                                </DataGrid.Columns>
+
+                            </DataGrid>
+
+                            <!-- Prioritized risks -->
+
+                            <TextBlock Text="Prioritized Risks"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,8"/>
+
+                            <DataGrid x:Name="PrioritizedRisksGrid"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      MinHeight="180"
+                                      MaxHeight="400"
+                                      CanUserAddRows="False"
+                                      HeadersVisibility="Column"
+                                      GridLinesVisibility="Horizontal"
+                                      Margin="0,0,0,22">
+
+                                <DataGrid.Columns>
+
+                                    <DataGridTextColumn Header="Priorità"
+                                                        Binding="{Binding Priority}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Classification"
+                                                        Binding="{Binding Classification}"
+                                                        Width="130"/>
+
+                                    <DataGridTextColumn Header="Categoria"
+                                                        Binding="{Binding Category}"
+                                                        Width="120"/>
+
+                                    <DataGridTextColumn Header="Gravità"
+                                                        Binding="{Binding Severity}"
+                                                        Width="90"/>
+
+                                    <DataGridTextColumn Header="Titolo"
+                                                        Binding="{Binding Title}"
+                                                        Width="2*"/>
+
+                                    <DataGridTextColumn Header="Risorsa"
+                                                        Binding="{Binding ResourceName}"
+                                                        Width="*"/>
+
+                                    <DataGridTextColumn Header="Impact"
+                                                        Binding="{Binding ImpactScore}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Effort"
+                                                        Binding="{Binding EffortScore}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Score"
+                                                        Binding="{Binding PriorityScore}"
+                                                        Width="80"/>
+
+                                </DataGrid.Columns>
+
+                            </DataGrid>
+
+                            <!-- Remediation roadmap -->
+
+                            <TextBlock Text="Remediation Roadmap"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,8"/>
+
+                            <DataGrid x:Name="RoadmapGrid"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      MinHeight="180"
+                                      MaxHeight="400"
+                                      CanUserAddRows="False"
+                                      HeadersVisibility="Column"
+                                      GridLinesVisibility="Horizontal">
+
+                                <DataGrid.Columns>
+
+                                    <DataGridTextColumn Header="Priorità"
+                                                        Binding="{Binding Priority}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Classification"
+                                                        Binding="{Binding Classification}"
+                                                        Width="130"/>
+
+                                    <DataGridTextColumn Header="Categoria"
+                                                        Binding="{Binding Category}"
+                                                        Width="120"/>
+
+                                    <DataGridTextColumn Header="Titolo"
+                                                        Binding="{Binding Title}"
+                                                        Width="2*"/>
+
+                                    <DataGridTextColumn Header="Azione"
+                                                        Binding="{Binding Action}"
+                                                        Width="2*"/>
+
+                                    <DataGridTextColumn Header="Score"
+                                                        Binding="{Binding PriorityScore}"
+                                                        Width="80"/>
+
+                                    <DataGridTextColumn Header="Review"
+                                                        Binding="{Binding RequiresReview}"
+                                                        Width="80"/>
+
+                                </DataGrid.Columns>
+
+                            </DataGrid>
+
+                        </StackPanel>
+
+                    </Border>
+
+                    <!-- Findings -->
+
                     <TextBlock Text="Rilievi"
                                FontSize="18"
                                FontWeight="SemiBold"
@@ -371,6 +776,8 @@
                         </DataGrid.Columns>
 
                     </DataGrid>
+
+                    <!-- Metrics -->
 
                     <TextBlock Text="Metriche Azure"
                                FontSize="18"
