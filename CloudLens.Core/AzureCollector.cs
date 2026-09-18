@@ -460,6 +460,35 @@ public sealed class AzureCollector
             $"Potential Monthly Saving: " +
             $"{tenantAssessment.Intelligence.PotentialMonthlySavingEur:F2} EUR");
 
+        // =====================================================
+        // PHASE 13 - ASSESSMENT QUALITY
+        // =====================================================
+
+        var quality =
+            tenantAssessment.Quality;
+
+        Console.WriteLine();
+        Console.WriteLine(
+            "CLOUDLENS - ASSESSMENT QUALITY");
+        Console.WriteLine(
+            $"Status: {quality.Status}");
+        Console.WriteLine(
+            $"Subscriptions: {quality.TotalSubscriptions}");
+        Console.WriteLine(
+            $"Complete: {quality.CompleteSubscriptions}");
+        Console.WriteLine(
+            $"Partial: {quality.PartialSubscriptions}");
+        Console.WriteLine(
+            $"Failed: {quality.FailedSubscriptions}");
+        Console.WriteLine(
+            $"Unsupported: {quality.UnsupportedSubscriptions}");
+        Console.WriteLine(
+            $"Enrichment Coverage: " +
+            $"{quality.EnrichmentCoveragePercent:F2}%");
+        Console.WriteLine(
+            $"Metric Coverage: " +
+            $"{quality.MetricCoveragePercent:F2}%");
+
         return tenantAssessment;
     }
 
@@ -475,6 +504,12 @@ public sealed class AzureCollector
     {
         ValidateToken(token);
         ValidateSubscription(subscription);
+
+        var qualityStatus =
+            AssessmentQualityStatus.Complete;
+
+        var errors =
+            new List<string>();
 
         // -----------------------------------------------------
         // RESOURCE DISCOVERY
@@ -499,9 +534,28 @@ public sealed class AzureCollector
                 _http,
                 token);
 
-        await enricher.EnrichAsync(
-            resources,
-            cancellationToken);
+        try
+        {
+            await enricher.EnrichAsync(
+                resources,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            qualityStatus =
+                AssessmentQualityStatus.Partial;
+
+            errors.Add(
+                $"ARM enrichment failed: {ex.Message}");
+
+            Console.WriteLine(
+                $"ARM enrichment error for " +
+                $"{subscription.Name}: {ex.Message}");
+        }
 
         // -----------------------------------------------------
         // RESOURCE RELATIONSHIPS
@@ -510,8 +564,23 @@ public sealed class AzureCollector
         var relationshipBuilder =
             new AzureRelationshipBuilder();
 
-        relationshipBuilder.Build(
-            resources);
+        try
+        {
+            relationshipBuilder.Build(
+                resources);
+        }
+        catch (Exception ex)
+        {
+            qualityStatus =
+                AssessmentQualityStatus.Partial;
+
+            errors.Add(
+                $"Relationship analysis failed: {ex.Message}");
+
+            Console.WriteLine(
+                $"Relationship analysis error for " +
+                $"{subscription.Name}: {ex.Message}");
+        }
 
         // -----------------------------------------------------
         // RESOURCE GRAPH
@@ -525,6 +594,9 @@ public sealed class AzureCollector
         // METRIC COLLECTION
         // -----------------------------------------------------
 
+        var metricProfiles =
+            new List<MetricProfile>();
+
         var monitorClient =
             new AzureMonitorClient(
                 _http,
@@ -535,46 +607,119 @@ public sealed class AzureCollector
                 .Select(resource => resource.Raw)
                 .ToList();
 
-        var metricProfiles =
-            await monitorClient.GetMetricsAsync(
-                rawResources,
-                cancellationToken);
+        try
+        {
+            metricProfiles =
+                await monitorClient.GetMetricsAsync(
+                    rawResources,
+                    cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            qualityStatus =
+                AssessmentQualityStatus.Partial;
+
+            errors.Add(
+                $"Metric collection failed: {ex.Message}");
+
+            Console.WriteLine(
+                $"Metric collection error for " +
+                $"{subscription.Name}: {ex.Message}");
+        }
 
         // -----------------------------------------------------
         // ASSESSMENT
         // -----------------------------------------------------
 
-        var result =
-            _assessmentEngine.Analyze(
-                resources,
-                subscription,
-                metricProfiles);
+        ScanResult result;
 
-        result.MetricProfiles =
-            metricProfiles;
+        try
+        {
+            result =
+                _assessmentEngine.Analyze(
+                    resources,
+                    subscription,
+                    metricProfiles);
+
+            result.MetricProfiles =
+                metricProfiles;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(
+                $"Assessment engine error for " +
+                $"{subscription.Name}: {ex.Message}");
+
+            return CreateFailedAssessment(
+                subscription,
+                ex,
+                resources);
+        }
 
         // -----------------------------------------------------
         // COVERAGE
         // -----------------------------------------------------
 
-        result.Coverage =
-            _coverageAnalyzer.Analyze(
-                resources,
-                metricProfiles);
+        try
+        {
+            result.Coverage =
+                _coverageAnalyzer.Analyze(
+                    resources,
+                    metricProfiles);
+        }
+        catch (Exception ex)
+        {
+            qualityStatus =
+                AssessmentQualityStatus.Partial;
+
+            errors.Add(
+                $"Coverage analysis failed: {ex.Message}");
+
+            Console.WriteLine(
+                $"Coverage analysis error for " +
+                $"{subscription.Name}: {ex.Message}");
+        }
 
         // -----------------------------------------------------
         // DIAGNOSTICS
         // -----------------------------------------------------
 
-        PrintScanDiagnostics(
-            resources,
-            metricProfiles,
-            resourceGraph);
+        try
+        {
+            PrintScanDiagnostics(
+                resources,
+                metricProfiles,
+                resourceGraph);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(
+                $"Diagnostics error for " +
+                $"{subscription.Name}: {ex.Message}");
+        }
+
+        var errorMessage =
+            errors.Count == 0
+                ? null
+                : string.Join(
+                    " | ",
+                    errors);
 
         return new SubscriptionAssessment(
             subscription,
             result,
-            resources);
+            resources)
+        {
+            Status =
+                qualityStatus,
+
+            ErrorMessage =
+                errorMessage
+        };
     }
 
     // =========================================================
@@ -603,7 +748,8 @@ public sealed class AzureCollector
     private static SubscriptionAssessment
         CreateFailedAssessment(
             AzureSubscription subscription,
-            Exception exception)
+            Exception exception,
+            IReadOnlyList<AzureResource>? resources = null)
     {
         var result =
             new ScanResult
@@ -622,7 +768,14 @@ public sealed class AzureCollector
         return new SubscriptionAssessment(
             subscription,
             result,
-            []);
+            resources ?? [])
+        {
+            Status =
+                AssessmentQualityStatus.Failed,
+
+            ErrorMessage =
+                exception.Message
+        };
     }
 
     // =========================================================

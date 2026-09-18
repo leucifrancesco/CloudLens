@@ -194,6 +194,26 @@ public static class AssessmentReportBuilder
                   color: #475467;
                 }
 
+                .complete {
+                  background: #e8f5ee;
+                  color: #137333;
+                }
+
+                .partial {
+                  background: #fff8db;
+                  color: #946200;
+                }
+
+                .failed {
+                  background: #fce8e6;
+                  color: #b42318;
+                }
+
+                .unsupported {
+                  background: #eee9ff;
+                  color: #6941c6;
+                }
+
                 .quickwin {
                   background: #e8f5ee;
                   color: #137333;
@@ -301,6 +321,16 @@ public static class AssessmentReportBuilder
                   border-left: 4px solid #087ea4;
                 }
 
+                .quality-limitations {
+                  background: #fffaf0;
+                  border-left: 4px solid #d99a00;
+                }
+
+                .quality-error {
+                  color: #b42318;
+                  font-size: 12px;
+                }
+
                 .footer {
                   margin-top: 40px;
                   padding-top: 15px;
@@ -373,6 +403,10 @@ public static class AssessmentReportBuilder
             "</div>");
 
         AppendExecutiveSummary(
+            html,
+            assessment);
+
+        AppendQuality(
             html,
             assessment);
 
@@ -505,6 +539,239 @@ public static class AssessmentReportBuilder
 
         html.AppendLine(
             $"<p>{GetScoreDescription(assessment.OverallScore)}</p>");
+
+        html.AppendLine(
+            "</div>");
+    }
+
+
+    private static void AppendQuality(
+        StringBuilder html,
+        TenantScanResult assessment)
+    {
+        var quality =
+            assessment.Quality;
+
+        html.AppendLine(
+            "<h2>Assessment Quality</h2>");
+
+        html.AppendLine(
+            "<div class=\"grid\">");
+
+        AppendQualityStatusCard(
+            html,
+            "Overall Status",
+            quality.Status);
+
+        AppendCard(
+            html,
+            "Total Subscriptions",
+            quality.TotalSubscriptions.ToString());
+
+        AppendCard(
+            html,
+            "Complete",
+            quality.CompleteSubscriptions.ToString());
+
+        AppendCard(
+            html,
+            "Partial",
+            quality.PartialSubscriptions.ToString());
+
+        AppendCard(
+            html,
+            "Failed",
+            quality.FailedSubscriptions.ToString());
+
+        AppendCard(
+            html,
+            "Unsupported",
+            quality.UnsupportedSubscriptions.ToString());
+
+        AppendCard(
+            html,
+            "Enrichment Coverage",
+            $"{quality.EnrichmentCoveragePercent:F1}%");
+
+        AppendCard(
+            html,
+            "Metric Coverage",
+            $"{quality.MetricCoveragePercent:F1}%");
+
+        html.AppendLine(
+            "</div>");
+
+        html.AppendLine(
+            "<div class=\"section\">");
+
+        html.AppendLine(
+            "<h3>Quality interpretation</h3>");
+
+        html.AppendLine(
+            $"<p>{Encode(GetQualityDescription(quality.Status))}</p>");
+
+        html.AppendLine(
+            "<p class=\"muted\">" +
+            "Assessment Quality describes the completeness of the collected " +
+            "assessment data. It does not represent the security or operational " +
+            "posture of the Azure environment." +
+            "</p>");
+
+        html.AppendLine(
+            "</div>");
+
+        if (quality.Limitations.Count > 0)
+        {
+            html.AppendLine(
+                "<div class=\"section quality-limitations\">");
+
+            html.AppendLine(
+                "<h3>Quality Limitations</h3>");
+
+            html.AppendLine(
+                "<p>" +
+                "The following limitations were identified during collection " +
+                "and should be considered when interpreting the assessment." +
+                "</p>");
+
+            html.AppendLine(
+                "<ul>");
+
+            foreach (var limitation in quality.Limitations)
+            {
+                html.AppendLine(
+                    $"<li>{Encode(limitation)}</li>");
+            }
+
+            html.AppendLine(
+                "</ul>");
+
+            html.AppendLine(
+                "</div>");
+        }
+
+        html.AppendLine(
+            "<div class=\"section\">");
+
+        html.AppendLine(
+            "<h3>Subscription Assessment Quality</h3>");
+
+        if (quality.Subscriptions.Count == 0)
+        {
+            html.AppendLine(
+                "<p class=\"muted\">" +
+                "No subscription quality data available." +
+                "</p>");
+        }
+        else
+        {
+            html.AppendLine(
+                "<table>");
+
+            html.AppendLine(
+                "<tr>" +
+                "<th>Subscription</th>" +
+                "<th>Status</th>" +
+                "<th>Error / Limitation</th>" +
+                "<th>Resources</th>" +
+                "<th>Enriched</th>" +
+                "<th>Enrichment Coverage</th>" +
+                "<th>Metric Profiles</th>" +
+                "<th>Metric Coverage</th>" +
+                "<th>Supported Types</th>" +
+                "<th>Generic Types</th>" +
+                "<th>Unsupported Types</th>" +
+                "</tr>");
+
+            foreach (var item in
+                     quality.Subscriptions
+                         .OrderBy(
+                             x => x.Subscription.Name,
+                             StringComparer.OrdinalIgnoreCase))
+            {
+                html.AppendLine(
+                    "<tr>");
+
+                html.AppendLine(
+                    $"<td>{Encode(item.Subscription.Name)}<br>" +
+                    $"<code>{Encode(item.Subscription.Id)}</code></td>");
+
+                html.AppendLine(
+                    $"<td>{QualityStatusBadge(item.Status)}</td>");
+
+                if (!string.IsNullOrWhiteSpace(item.ErrorMessage))
+                {
+                    html.AppendLine(
+                        $"<td class=\"quality-error\">" +
+                        $"{Encode(item.ErrorMessage)}</td>");
+                }
+                else
+                {
+                    html.AppendLine(
+                        "<td>" +
+                        "<span class=\"muted\">None</span>" +
+                        "</td>");
+                }
+
+                html.AppendLine(
+                    $"<td>{item.Resources.Count}</td>");
+
+                var enrichedResources =
+                    item.Resources.Count(
+                        resource =>
+                            resource.Enrichment?.Success == true);
+
+                html.AppendLine(
+                    $"<td>{enrichedResources}</td>");
+
+                var enrichmentCoverage =
+                    item.Resources.Count == 0
+                        ? 0
+                        : enrichedResources * 100.0 /
+                          item.Resources.Count;
+
+                html.AppendLine(
+                    $"<td>{enrichmentCoverage:F1}%</td>");
+
+                html.AppendLine(
+                    $"<td>{item.Result.MetricProfiles.Count}</td>");
+
+                var metricResourceIds =
+                    item.Result.MetricProfiles
+                        .Select(
+                            metric => metric.ResourceId)
+                        .Where(
+                            id =>
+                                !string.IsNullOrWhiteSpace(id))
+                        .Distinct(
+                            StringComparer.OrdinalIgnoreCase)
+                        .Count();
+
+                var metricCoverage =
+                    item.Resources.Count == 0
+                        ? 0
+                        : metricResourceIds * 100.0 /
+                          item.Resources.Count;
+
+                html.AppendLine(
+                    $"<td>{metricCoverage:F1}%</td>");
+
+                html.AppendLine(
+                    $"<td>{item.Result.Coverage.SupportedResourceTypes}</td>");
+
+                html.AppendLine(
+                    $"<td>{item.Result.Coverage.GenericResourceTypes}</td>");
+
+                html.AppendLine(
+                    $"<td>{item.Result.Coverage.UnsupportedResourceTypes}</td>");
+
+                html.AppendLine(
+                    "</tr>");
+            }
+
+            html.AppendLine(
+                "</table>");
+        }
 
         html.AppendLine(
             "</div>");
@@ -1794,6 +2061,79 @@ public static class AssessmentReportBuilder
 
         html.AppendLine(
             "</div>");
+    }
+
+
+    private static void AppendQualityStatusCard(
+        StringBuilder html,
+        string title,
+        AssessmentQualityStatus status)
+    {
+        html.AppendLine(
+            "<div class=\"card\">");
+
+        html.AppendLine(
+            $"<div class=\"muted\">" +
+            $"{Encode(title)}</div>");
+
+        html.AppendLine(
+            $"<div style=\"margin-top:10px;\">" +
+            $"{QualityStatusBadge(status)}</div>");
+
+        html.AppendLine(
+            "</div>");
+    }
+
+
+    private static string QualityStatusBadge(
+        AssessmentQualityStatus status)
+    {
+        var cssClass =
+            status switch
+            {
+                AssessmentQualityStatus.Complete =>
+                    "complete",
+
+                AssessmentQualityStatus.Partial =>
+                    "partial",
+
+                AssessmentQualityStatus.Failed =>
+                    "failed",
+
+                AssessmentQualityStatus.Unsupported =>
+                    "unsupported",
+
+                _ =>
+                    "p3"
+            };
+
+        return
+            $"<span class=\"badge {cssClass}\">" +
+            $"{Encode(status.ToString())}" +
+            "</span>";
+    }
+
+
+    private static string GetQualityDescription(
+        AssessmentQualityStatus status)
+    {
+        return status switch
+        {
+            AssessmentQualityStatus.Complete =>
+                "The assessment completed without subscription-level collection errors.",
+
+            AssessmentQualityStatus.Partial =>
+                "The assessment completed with one or more collection or analysis limitations. Results should be interpreted together with the listed limitations.",
+
+            AssessmentQualityStatus.Failed =>
+                "One or more subscriptions failed during assessment collection. The available results may not represent the complete environment.",
+
+            AssessmentQualityStatus.Unsupported =>
+                "The assessment contains unsupported resource coverage and should not be considered fully representative of the environment.",
+
+            _ =>
+                "Assessment quality could not be determined."
+        };
     }
 
 

@@ -22,6 +22,14 @@ public enum Category
     Governance
 }
 
+public enum AssessmentQualityStatus
+{
+    Complete,
+    Partial,
+    Failed,
+    Unsupported
+}
+
 public sealed record Finding(
     string Id,
     Category Category,
@@ -138,7 +146,37 @@ public sealed record ResourceTypeSummary(
 public sealed record SubscriptionAssessment(
     AzureSubscription Subscription,
     ScanResult Result,
-    IReadOnlyList<AzureResource> Resources);
+    IReadOnlyList<AzureResource> Resources)
+{
+    public AssessmentQualityStatus Status { get; init; } =
+        AssessmentQualityStatus.Complete;
+
+    public string? ErrorMessage { get; init; }
+}
+
+public sealed class AssessmentQualityReport
+{
+    public AssessmentQualityStatus Status { get; init; } =
+        AssessmentQualityStatus.Complete;
+
+    public int TotalSubscriptions { get; init; }
+
+    public int CompleteSubscriptions { get; init; }
+
+    public int PartialSubscriptions { get; init; }
+
+    public int FailedSubscriptions { get; init; }
+
+    public int UnsupportedSubscriptions { get; init; }
+
+    public double EnrichmentCoveragePercent { get; init; }
+
+    public double MetricCoveragePercent { get; init; }
+
+    public IReadOnlyList<string> Limitations { get; init; } = [];
+
+    public IReadOnlyList<SubscriptionAssessment> Subscriptions { get; init; } = [];
+}
 
 public sealed class TenantScanResult
 {
@@ -151,6 +189,162 @@ public sealed class TenantScanResult
     public List<SubscriptionAssessment> Subscriptions { get; init; } = [];
 
     public AssessmentIntelligence Intelligence { get; set; } = new();
+
+    public AssessmentQualityReport Quality
+    {
+        get
+        {
+            if (Subscriptions.Count == 0)
+            {
+                return new AssessmentQualityReport
+                {
+                    Status = AssessmentQualityStatus.Complete,
+                    TotalSubscriptions = 0,
+                    CompleteSubscriptions = 0,
+                    PartialSubscriptions = 0,
+                    FailedSubscriptions = 0,
+                    UnsupportedSubscriptions = 0,
+                    EnrichmentCoveragePercent = 0,
+                    MetricCoveragePercent = 0,
+                    Limitations = []
+                };
+            }
+
+            var complete =
+                Subscriptions.Count(
+                    x =>
+                        x.Status ==
+                        AssessmentQualityStatus.Complete);
+
+            var partial =
+                Subscriptions.Count(
+                    x =>
+                        x.Status ==
+                        AssessmentQualityStatus.Partial);
+
+            var failed =
+                Subscriptions.Count(
+                    x =>
+                        x.Status ==
+                        AssessmentQualityStatus.Failed);
+
+            var unsupported =
+                Subscriptions.Count(
+                    x =>
+                        x.Status ==
+                        AssessmentQualityStatus.Unsupported);
+
+            var totalResources =
+                Subscriptions.Sum(
+                    x =>
+                        x.Resources.Count);
+
+            var enrichedResources =
+                Subscriptions.Sum(
+                    x =>
+                        x.Resources.Count(
+                            resource =>
+                                resource.Enrichment?.Success ==
+                                true));
+
+            var metricResourceIds =
+                Subscriptions
+                    .SelectMany(
+                        x =>
+                            x.Result.MetricProfiles)
+                    .Select(
+                        metric =>
+                            metric.ResourceId)
+                    .Where(
+                        id =>
+                            !string.IsNullOrWhiteSpace(id))
+                    .Distinct(
+                        StringComparer.OrdinalIgnoreCase)
+                    .Count();
+
+            var enrichmentCoverage =
+                totalResources == 0
+                    ? 0
+                    : enrichedResources * 100.0 /
+                      totalResources;
+
+            var metricCoverage =
+                totalResources == 0
+                    ? 0
+                    : metricResourceIds * 100.0 /
+                      totalResources;
+
+            var limitations =
+                Subscriptions
+                    .Where(
+                        x =>
+                            x.Status !=
+                            AssessmentQualityStatus.Complete)
+                    .Select(
+                        x =>
+                            string.IsNullOrWhiteSpace(
+                                x.ErrorMessage)
+                                ? $"{x.Subscription.Name}: " +
+                                  GetDefaultQualityMessage(
+                                      x.Status)
+                                : $"{x.Subscription.Name}: " +
+                                  x.ErrorMessage)
+                    .ToList();
+
+            foreach (var subscription in Subscriptions)
+            {
+                var unsupportedResourceTypes =
+                    subscription.Result.Coverage
+                        .UnsupportedResourceTypes;
+
+                if (unsupportedResourceTypes > 0)
+                {
+                    limitations.Add(
+                        $"{subscription.Subscription.Name}: " +
+                        $"{unsupportedResourceTypes} resource type(s) " +
+                        "not covered by a specialized analyzer.");
+                }
+            }
+
+            AssessmentQualityStatus status;
+
+            if (failed > 0)
+            {
+                status = AssessmentQualityStatus.Failed;
+            }
+            else if (partial > 0)
+            {
+                status = AssessmentQualityStatus.Partial;
+            }
+            else if (unsupported > 0 &&
+                     complete == 0)
+            {
+                status = AssessmentQualityStatus.Unsupported;
+            }
+            else if (unsupported > 0)
+            {
+                status = AssessmentQualityStatus.Partial;
+            }
+            else
+            {
+                status = AssessmentQualityStatus.Complete;
+            }
+
+            return new AssessmentQualityReport
+            {
+                Status = status,
+                TotalSubscriptions = Subscriptions.Count,
+                CompleteSubscriptions = complete,
+                PartialSubscriptions = partial,
+                FailedSubscriptions = failed,
+                UnsupportedSubscriptions = unsupported,
+                EnrichmentCoveragePercent = enrichmentCoverage,
+                MetricCoveragePercent = metricCoverage,
+                Limitations = limitations,
+                Subscriptions = Subscriptions
+            };
+        }
+    }
 
     public IReadOnlyList<AzureResource> AllResources =>
         Subscriptions
@@ -448,5 +642,24 @@ public sealed class TenantScanResult
                     allServices
             };
         }
+    }
+
+    private static string GetDefaultQualityMessage(
+        AssessmentQualityStatus status)
+    {
+        return status switch
+        {
+            AssessmentQualityStatus.Partial =>
+                "Assessment partially completed.",
+
+            AssessmentQualityStatus.Failed =>
+                "Assessment failed.",
+
+            AssessmentQualityStatus.Unsupported =>
+                "Assessment contains unsupported resource types.",
+
+            _ =>
+                "Assessment completed."
+        };
     }
 }

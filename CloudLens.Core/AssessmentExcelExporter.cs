@@ -41,6 +41,10 @@ public static class AssessmentExcelExporter
             workbook,
             document);
 
+        CreateQualitySheet(
+            workbook,
+            document);
+
         CreateSubscriptionsSheet(
             workbook,
             document);
@@ -114,7 +118,9 @@ public static class AssessmentExcelExporter
                 ("Systemic Risks", document.Intelligence.SystemicRiskCount.ToString()),
                 ("Potential Monthly Saving EUR",
                     document.Intelligence.PotentialMonthlySavingEur
-                        .ToString("F2"))
+                        .ToString("F2")),
+                ("Assessment Quality", document.Quality.Status.ToString()),
+                ("Quality Limitations", document.Quality.Limitations.Count.ToString())
             };
 
         sheet.Cell("A3").Value =
@@ -934,6 +940,212 @@ public static class AssessmentExcelExporter
         sheet.Column(15).Width = 55;
 
         sheet.SheetView.FreezeRows(4);
+    }
+
+    private static void CreateQualitySheet(
+        XLWorkbook workbook,
+        AssessmentExportDocument document)
+    {
+        var sheet =
+            workbook.Worksheets.Add(
+                "Quality");
+
+        sheet.Cell("A1").Value =
+            "CloudLens Assessment Quality";
+
+        sheet.Cell("A1").Style.Font.Bold =
+            true;
+
+        sheet.Cell("A1").Style.Font.FontSize =
+            18;
+
+        sheet.Range("A1:J1")
+            .Merge();
+
+        sheet.Cell("A3").Value =
+            "Overall Quality";
+
+        sheet.Cell("A3").Style.Font.Bold =
+            true;
+
+        WriteHeader(
+            sheet,
+            new[]
+            {
+                "Metric",
+                "Value"
+            },
+            4);
+
+        var summaryRows =
+            new[]
+            {
+                ("Status",
+                    document.Quality.Status.ToString()),
+
+                ("Total Subscriptions",
+                    document.Quality.TotalSubscriptions.ToString()),
+
+                ("Complete Subscriptions",
+                    document.Quality.CompleteSubscriptions.ToString()),
+
+                ("Partial Subscriptions",
+                    document.Quality.PartialSubscriptions.ToString()),
+
+                ("Failed Subscriptions",
+                    document.Quality.FailedSubscriptions.ToString()),
+
+                ("Unsupported Subscriptions",
+                    document.Quality.UnsupportedSubscriptions.ToString()),
+
+                ("Enrichment Coverage",
+                    $"{document.Quality.EnrichmentCoveragePercent:F1}%"),
+
+                ("Metric Coverage",
+                    $"{document.Quality.MetricCoveragePercent:F1}%")
+            };
+
+        var summaryRow = 5;
+
+        foreach (var item in summaryRows)
+        {
+            sheet.Cell(summaryRow, 1).Value =
+                item.Item1;
+
+            sheet.Cell(summaryRow, 2).Value =
+                item.Item2;
+
+            summaryRow++;
+        }
+
+        var limitationsStartRow =
+            summaryRow + 2;
+
+        sheet.Cell(limitationsStartRow, 1).Value =
+            "Limitations";
+
+        sheet.Cell(limitationsStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        WriteHeader(
+            sheet,
+            new[]
+            {
+                "Limitation"
+            },
+            limitationsStartRow + 1);
+
+        var limitationRow =
+            limitationsStartRow + 2;
+
+        foreach (var limitation in document.Quality.Limitations)
+        {
+            sheet.Cell(limitationRow, 1).Value =
+                limitation;
+
+            limitationRow++;
+        }
+
+        if (document.Quality.Limitations.Count == 0)
+        {
+            sheet.Cell(limitationRow, 1).Value =
+                "No assessment limitations reported.";
+        }
+
+        var subscriptionsStartRow =
+            limitationRow + 2;
+
+        sheet.Cell(subscriptionsStartRow, 1).Value =
+            "Subscription Quality";
+
+        sheet.Cell(subscriptionsStartRow, 1)
+            .Style.Font.Bold =
+            true;
+
+        var subscriptionHeaders =
+            new[]
+            {
+                "Name",
+                "Subscription ID",
+                "Status",
+                "Error",
+                "Resources",
+                "Enriched Resources",
+                "Enrichment Coverage",
+                "Metric Profiles",
+                "Metric Coverage",
+                "Supported Resource Types",
+                "Generic Resource Types",
+                "Unsupported Resource Types"
+            };
+
+        WriteHeader(
+            sheet,
+            subscriptionHeaders,
+            subscriptionsStartRow + 1);
+
+        var subscriptionRow =
+            subscriptionsStartRow + 2;
+
+        foreach (var item in document.Quality.Subscriptions)
+        {
+            sheet.Cell(subscriptionRow, 1).Value =
+                item.Name;
+
+            sheet.Cell(subscriptionRow, 2).Value =
+                item.Id;
+
+            sheet.Cell(subscriptionRow, 3).Value =
+                item.Status.ToString();
+
+            sheet.Cell(subscriptionRow, 4).Value =
+                item.ErrorMessage ?? "";
+
+            sheet.Cell(subscriptionRow, 5).Value =
+                item.Resources;
+
+            sheet.Cell(subscriptionRow, 6).Value =
+                item.EnrichedResources;
+
+            sheet.Cell(subscriptionRow, 7).Value =
+                $"{item.EnrichmentCoveragePercent:F1}%";
+
+            sheet.Cell(subscriptionRow, 8).Value =
+                item.MetricProfiles;
+
+            sheet.Cell(subscriptionRow, 9).Value =
+                $"{item.MetricCoveragePercent:F1}%";
+
+            sheet.Cell(subscriptionRow, 10).Value =
+                item.SupportedResourceTypes;
+
+            sheet.Cell(subscriptionRow, 11).Value =
+                item.GenericResourceTypes;
+
+            sheet.Cell(subscriptionRow, 12).Value =
+                item.UnsupportedResourceTypes;
+
+            subscriptionRow++;
+        }
+
+        FinalizeTable(
+            sheet,
+            subscriptionRow - 1,
+            subscriptionHeaders.Length);
+
+        sheet.Column(1).Width = 35;
+        sheet.Column(2).Width = 40;
+        sheet.Column(3).Width = 15;
+        sheet.Column(4).Width = 60;
+        sheet.Column(7).Width = 22;
+        sheet.Column(9).Width = 22;
+        sheet.Column(10).Width = 25;
+        sheet.Column(11).Width = 25;
+        sheet.Column(12).Width = 28;
+
+        sheet.SheetView.FreezeRows(
+            subscriptionsStartRow + 1);
     }
 
     private static void CreateSubscriptionsSheet(

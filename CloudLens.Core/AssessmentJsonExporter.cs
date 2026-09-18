@@ -82,6 +82,9 @@ public static class AssessmentJsonExporter
             AssessmentInsights.Build(
                 assessment);
 
+        var quality =
+            assessment.Quality;
+
         return new AssessmentExportDocument
         {
             ExportVersion = "1.2",
@@ -94,12 +97,18 @@ public static class AssessmentJsonExporter
             TotalResourceTypes = assessment.TotalResourceTypes,
             TotalRelationships = assessment.TotalRelationships,
             EnrichedResources = assessment.EnrichedResources,
-            EnrichmentCoveragePercent = assessment.EnrichmentCoveragePercent,
-            TotalMetricProfiles = assessment.TotalMetricProfiles,
-            CriticalFindings = assessment.CriticalFindings,
-            HighFindings = assessment.HighFindings,
-            MediumFindings = assessment.MediumFindings,
-            LowFindings = assessment.LowFindings,
+            EnrichmentCoveragePercent =
+                assessment.EnrichmentCoveragePercent,
+            TotalMetricProfiles =
+                assessment.TotalMetricProfiles,
+            CriticalFindings =
+                assessment.CriticalFindings,
+            HighFindings =
+                assessment.HighFindings,
+            MediumFindings =
+                assessment.MediumFindings,
+            LowFindings =
+                assessment.LowFindings,
 
             ScoresByCategory =
                 new Dictionary<Category, int>(
@@ -112,6 +121,10 @@ public static class AssessmentJsonExporter
             Intelligence =
                 BuildExportIntelligence(
                     assessment.Intelligence),
+
+            Quality =
+                BuildExportQuality(
+                    quality),
 
             Subscriptions =
                 assessment.Subscriptions
@@ -192,6 +205,99 @@ public static class AssessmentJsonExporter
                             metric.Maximum,
                             metric.SampleCount,
                             metric.LookbackDays))
+                    .ToList()
+        };
+    }
+
+    private static AssessmentExportQuality
+        BuildExportQuality(
+            AssessmentQualityReport quality)
+    {
+        return new AssessmentExportQuality
+        {
+            Status =
+                quality.Status,
+
+            TotalSubscriptions =
+                quality.TotalSubscriptions,
+
+            CompleteSubscriptions =
+                quality.CompleteSubscriptions,
+
+            PartialSubscriptions =
+                quality.PartialSubscriptions,
+
+            FailedSubscriptions =
+                quality.FailedSubscriptions,
+
+            UnsupportedSubscriptions =
+                quality.UnsupportedSubscriptions,
+
+            EnrichmentCoveragePercent =
+                quality.EnrichmentCoveragePercent,
+
+            MetricCoveragePercent =
+                quality.MetricCoveragePercent,
+
+            Limitations =
+                quality.Limitations
+                    .ToList(),
+
+            Subscriptions =
+                quality.Subscriptions
+                    .Select(item =>
+                    {
+                        var totalResources =
+                            item.Resources.Count;
+
+                        var enrichedResources =
+                            item.Resources.Count(
+                                resource =>
+                                    resource.Enrichment?.Success ==
+                                    true);
+
+                        var metricResourceIds =
+                            item.Result.MetricProfiles
+                                .Select(
+                                    metric =>
+                                        metric.ResourceId)
+                                .Where(
+                                    id =>
+                                        !string.IsNullOrWhiteSpace(id))
+                                .Distinct(
+                                    StringComparer.OrdinalIgnoreCase)
+                                .Count();
+
+                        var enrichmentCoverage =
+                            totalResources == 0
+                                ? 0
+                                : enrichedResources * 100.0 /
+                                  totalResources;
+
+                        var metricCoverage =
+                            totalResources == 0
+                                ? 0
+                                : metricResourceIds * 100.0 /
+                                  totalResources;
+
+                        return
+                            new AssessmentExportSubscriptionQuality(
+                                item.Subscription.Name,
+                                item.Subscription.Id,
+                                item.Status,
+                                item.ErrorMessage,
+                                totalResources,
+                                enrichedResources,
+                                enrichmentCoverage,
+                                item.Result.MetricProfiles.Count,
+                                metricCoverage,
+                                item.Result.Coverage
+                                    .SupportedResourceTypes,
+                                item.Result.Coverage
+                                    .GenericResourceTypes,
+                                item.Result.Coverage
+                                    .UnsupportedResourceTypes);
+                    })
                     .ToList()
         };
     }

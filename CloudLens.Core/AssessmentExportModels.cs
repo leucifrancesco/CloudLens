@@ -25,6 +25,8 @@ public sealed class AssessmentExportDocument
 
     public AssessmentExportIntelligence Intelligence { get; init; } = new();
 
+    public AssessmentExportQuality Quality { get; init; } = new();
+
     public IReadOnlyList<AssessmentExportSubscription> Subscriptions { get; init; } = [];
     public IReadOnlyList<AssessmentExportResourceType> ResourceInventory { get; init; } = [];
     public IReadOnlyList<AssessmentExportFinding> Findings { get; init; } = [];
@@ -62,6 +64,44 @@ public sealed class AssessmentExportIntelligence
     public IReadOnlyList<AssessmentExportSystemicRisk> SystemicRisks { get; init; } = [];
     public IReadOnlyList<AssessmentExportRoadmapItem> Roadmap { get; init; } = [];
 }
+
+public sealed class AssessmentExportQuality
+{
+    public AssessmentQualityStatus Status { get; init; } =
+        AssessmentQualityStatus.Complete;
+
+    public int TotalSubscriptions { get; init; }
+
+    public int CompleteSubscriptions { get; init; }
+
+    public int PartialSubscriptions { get; init; }
+
+    public int FailedSubscriptions { get; init; }
+
+    public int UnsupportedSubscriptions { get; init; }
+
+    public double EnrichmentCoveragePercent { get; init; }
+
+    public double MetricCoveragePercent { get; init; }
+
+    public IReadOnlyList<string> Limitations { get; init; } = [];
+
+    public IReadOnlyList<AssessmentExportSubscriptionQuality> Subscriptions { get; init; } = [];
+}
+
+public sealed record AssessmentExportSubscriptionQuality(
+    string Name,
+    string Id,
+    AssessmentQualityStatus Status,
+    string? ErrorMessage,
+    int Resources,
+    int EnrichedResources,
+    double EnrichmentCoveragePercent,
+    int MetricProfiles,
+    double MetricCoveragePercent,
+    int SupportedResourceTypes,
+    int GenericResourceTypes,
+    int UnsupportedResourceTypes);
 
 public sealed record AssessmentExportIntelligenceRisk(
     string FindingId,
