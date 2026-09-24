@@ -65,6 +65,12 @@ public sealed class AzureMonitorClient
             IReadOnlyList<JsonElement> resources,
             CancellationToken cancellationToken = default)
     {
+        if (resources == null)
+        {
+            throw new ArgumentNullException(
+                nameof(resources));
+        }
+
         if (resources.Count == 0)
         {
             return new MetricCollectionResult();
@@ -190,6 +196,7 @@ public sealed class AzureMonitorClient
             }
 
             var collectedMetrics = 0;
+            var metricErrors = new List<string>();
 
             foreach (var definition in definitions)
             {
@@ -216,17 +223,37 @@ public sealed class AzureMonitorClient
                 {
                     throw;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Una singola metrica non deve
-                    // compromettere l'intera scansione.
+                    metricErrors.Add(
+                        $"{definition.Name}: {ex.Message}");
                 }
             }
 
-            var status =
-                collectedMetrics > 0
-                    ? MetricCoverageStatus.Collected
-                    : MetricCoverageStatus.NoData;
+            MetricCoverageStatus status;
+
+            if (collectedMetrics > 0)
+            {
+                status =
+                    MetricCoverageStatus.Collected;
+            }
+            else if (metricErrors.Count > 0)
+            {
+                status =
+                    MetricCoverageStatus.Error;
+            }
+            else
+            {
+                status =
+                    MetricCoverageStatus.NoData;
+            }
+
+            var error =
+                metricErrors.Count == 0
+                    ? null
+                    : string.Join(
+                        " | ",
+                        metricErrors);
 
             coverage.Add(
                 new MetricResourceCoverage(
@@ -236,7 +263,7 @@ public sealed class AzureMonitorClient
                     definitions.Count,
                     collectedMetrics,
                     status,
-                    null));
+                    error));
         }
         finally
         {

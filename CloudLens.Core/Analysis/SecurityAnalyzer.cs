@@ -107,6 +107,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     Add(
                         findings,
                         nsg,
+                        Category.Security,
                         "SEC-NSG-INBOUND-ANY",
                         Severity.Critical,
                         "NSG consente traffico inbound Internet su qualsiasi porta",
@@ -122,6 +123,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     Add(
                         findings,
                         nsg,
+                        Category.Security,
                         "SEC-NSG-SSH-INTERNET",
                         Severity.High,
                         "SSH esposto direttamente a Internet",
@@ -135,6 +137,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     Add(
                         findings,
                         nsg,
+                        Category.Security,
                         "SEC-NSG-RDP-INTERNET",
                         Severity.High,
                         "RDP esposto direttamente a Internet",
@@ -161,11 +164,12 @@ public sealed class SecurityAnalyzer : IAnalyzer
             Add(
                 findings,
                 pip,
+                Category.Cost,
                 "SEC-PIP-UNUSED",
                 Severity.Low,
                 "Public IP non associata rilevata",
                 "La Public IP non presenta relazioni verso risorse individuate.",
-                "Una Public IP inutilizzata può rappresentare costo e superficie amministrativa non necessaria.",
+                "Una Public IP inutilizzata può rappresentare un costo e una risorsa amministrativa non necessaria.",
                 "Verificare la risorsa e rimuoverla se non più necessaria.");
         }
     }
@@ -193,6 +197,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 Add(
                     findings,
                     storage,
+                    Category.Security,
                     "SEC-STORAGE-BLOB-PUBLIC",
                     Severity.High,
                     "Blob public access consentito",
@@ -209,6 +214,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 Add(
                     findings,
                     storage,
+                    Category.Security,
                     "SEC-STORAGE-HTTPS",
                     Severity.Medium,
                     "Storage Account senza HTTPS obbligatorio",
@@ -234,6 +240,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 Add(
                     findings,
                     storage,
+                    Category.Security,
                     "SEC-STORAGE-TLS-OLD",
                     Severity.High,
                     "Storage Account con TLS obsoleto",
@@ -412,6 +419,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 Add(
                     findings,
                     sql,
+                    Category.Security,
                     "SEC-SQL-PUBLIC-NETWORK",
                     Severity.Medium,
                     "Azure SQL Server con public network access",
@@ -445,6 +453,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 Add(
                     findings,
                     app,
+                    Category.Security,
                     "SEC-APP-NO-HTTPS",
                     Severity.Medium,
                     "App Service senza HTTPS Only",
@@ -653,6 +662,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
     private static void Add(
         List<Finding> findings,
         AzureResource resource,
+        Category category,
         string ruleId,
         Severity severity,
         string title,
@@ -666,7 +676,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     $"{ruleId}-{resource.Id}",
 
                 Category:
-                    Category.Security,
+                    category,
 
                 Severity:
                     severity,

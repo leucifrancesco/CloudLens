@@ -10,13 +10,16 @@ public sealed class OperationsAnalyzer : IAnalyzer
         AzureSubscription subscription)
     {
         if (resources == null)
+        {
             throw new ArgumentNullException(nameof(resources));
+        }
 
         if (subscription == null)
+        {
             throw new ArgumentNullException(nameof(subscription));
+        }
 
-        var findings =
-            new List<Finding>();
+        var findings = new List<Finding>();
 
         AnalyzeMissingTags(
             resources,
@@ -59,10 +62,10 @@ public sealed class OperationsAnalyzer : IAnalyzer
         findings.Add(
             new Finding(
                 Id:
-                    Guid.NewGuid().ToString(),
+                    $"GOV-NO-TAGS-{subscription.Id}",
 
                 Category:
-                    Category.Operations,
+                    Category.Governance,
 
                 Severity:
                     Severity.Medium,
@@ -75,15 +78,20 @@ public sealed class OperationsAnalyzer : IAnalyzer
 
                 Description:
                     $"{untagged.Count} risorse su {resources.Count} " +
-                    "non hanno tag di governance.",
+                    "non espongono tag nella discovery effettuata.",
 
                 Impact:
-                    "Riduce la capacità di attribuire costi, " +
-                    "ownership e ambiente.",
+                    "L'assenza di una strategia di tagging può " +
+                    "limitare l'attribuzione dei costi, " +
+                    "l'identificazione dell'ownership e la distinzione " +
+                    "tra ambienti e workload.",
 
                 Recommendation:
-                    "Definire uno standard di tagging e applicarlo " +
-                    "tramite Azure Policy.",
+                    "Verificare i requisiti di governance del tenant " +
+                    "e definire uno standard di tagging coerente con " +
+                    "le esigenze dell'organizzazione. Se appropriato, " +
+                    "applicare e controllare lo standard tramite " +
+                    "Azure Policy.",
 
                 ResourceName:
                     subscription.Name,
@@ -96,7 +104,7 @@ public sealed class OperationsAnalyzer : IAnalyzer
     }
 
     // =========================================================
-    // LOCATION
+    // LOCATION / DISCOVERY QUALITY
     // =========================================================
 
     private static void AnalyzeMissingLocation(
@@ -118,10 +126,10 @@ public sealed class OperationsAnalyzer : IAnalyzer
         findings.Add(
             new Finding(
                 Id:
-                    Guid.NewGuid().ToString(),
+                    $"GOV-NO-LOCATION-{subscription.Id}",
 
                 Category:
-                    Category.Operations,
+                    Category.Governance,
 
                 Severity:
                     Severity.Low,
@@ -134,15 +142,19 @@ public sealed class OperationsAnalyzer : IAnalyzer
 
                 Description:
                     $"{invalid} risorse non espongono una " +
-                    "location valida nella discovery.",
+                    "location valida nei dati raccolti " +
+                    "durante la discovery.",
 
                 Impact:
-                    "Può complicare governance, inventory e " +
-                    "analisi geografica dell'ambiente.",
+                    "I dati incompleti possono ridurre l'affidabilità " +
+                    "dell'inventory e delle analisi basate sulla " +
+                    "distribuzione geografica delle risorse.",
 
                 Recommendation:
-                    "Verificare la risorsa e la modalità con cui " +
-                    "viene esposta da Azure Resource Manager.",
+                    "Verificare se l'assenza della location dipende " +
+                    "dal tipo di risorsa o dalla modalità di discovery. " +
+                    "Non considerare automaticamente la risorsa " +
+                    "non conforme.",
 
                 ResourceName:
                     subscription.Name,
@@ -181,29 +193,28 @@ public sealed class OperationsAnalyzer : IAnalyzer
 
             /*
              * AzureResourceClient arricchisce le properties
-             * della VM con il valore interno:
+             * della VM con:
              *
              * cloudLensBackupProtected
              *
              * Il valore viene ricavato da Azure Resource Graph
-             * correlando la VM con:
+             * correlando la VM con RecoveryServicesResources
+             * / protectedItems / properties.sourceResourceId.
              *
-             * RecoveryServicesResources
-             *   -> protectedItems
-             *   -> properties.sourceResourceId
-             *
-             * Non utilizziamo quindi:
-             * - presenza di un Recovery Services Vault
-             * - nome della VM
-             * - nome del Protected Item
-             * - semplici relazioni infrastrutturali
+             * IMPORTANTE:
+             * l'assenza della proprietà non viene interpretata
+             * come "backup assente". In quel caso il dato di
+             * enrichment non è disponibile e il finding viene
+             * omesso per evitare falsi positivi.
              */
 
-            var backupProtected =
-                GetBool(
+            if (!TryGetBool(
                     properties.Value,
                     "cloudLensBackupProtected",
-                    false);
+                    out var backupProtected))
+            {
+                continue;
+            }
 
             if (backupProtected)
             {
@@ -216,9 +227,13 @@ public sealed class OperationsAnalyzer : IAnalyzer
                 "OPS-VM-NO-BACKUP",
                 Severity.Medium,
                 "VM senza protezione Azure Backup rilevata",
-                "La VM non risulta associata a un Protected Item Azure Backup per la relativa risorsa.",
-                "La VM potrebbe non essere protetta da un processo di backup Azure configurato.",
-                "Verificare i requisiti di protezione della VM e configurare Azure Backup tramite una policy appropriata se necessario.");
+                "La VM non risulta associata a un Protected Item " +
+                "Azure Backup nei dati di enrichment raccolti.",
+                "La VM potrebbe non essere protetta da un processo " +
+                "di backup Azure configurato.",
+                "Verificare i requisiti di protezione della VM e, " +
+                "se necessario, configurare Azure Backup tramite " +
+                "una policy appropriata.");
         }
     }
 
@@ -236,24 +251,33 @@ public sealed class OperationsAnalyzer : IAnalyzer
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool GetBool(
+    private static bool TryGetBool(
         JsonElement element,
         string name,
-        bool defaultValue)
+        out bool value)
     {
         if (!element.TryGetProperty(
                 name,
-                out var value))
+                out var property))
         {
-            return defaultValue;
+            value = false;
+            return false;
         }
 
-        return value.ValueKind switch
+        switch (property.ValueKind)
         {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => defaultValue
-        };
+            case JsonValueKind.True:
+                value = true;
+                return true;
+
+            case JsonValueKind.False:
+                value = false;
+                return true;
+
+            default:
+                value = false;
+                return false;
+        }
     }
 
     private static void Add(

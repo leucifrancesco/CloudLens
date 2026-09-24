@@ -9,8 +9,7 @@ public sealed class CostAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
-        var findings =
-            new List<Finding>();
+        var findings = new List<Finding>();
 
         AnalyzeUnattachedDisks(
             resources,
@@ -20,7 +19,7 @@ public sealed class CostAnalyzer : IAnalyzer
             resources,
             findings);
 
-        AnalyzePublicIpSku(
+        AnalyzeRetiredPublicIpSku(
             resources,
             findings);
 
@@ -79,7 +78,7 @@ public sealed class CostAnalyzer : IAnalyzer
             findings.Add(
                 new Finding(
                     Id:
-                        Guid.NewGuid().ToString(),
+                        $"COST-UNATTACHED-DISK-{resource.Id}",
 
                     Category:
                         Category.Cost,
@@ -98,13 +97,16 @@ public sealed class CostAnalyzer : IAnalyzer
                         "non risulta associato ad alcuna VM.",
 
                     Impact:
-                        "Il disco può generare un costo ricorrente " +
-                        "senza essere utilizzato.",
+                        "Un managed disk non associato può continuare " +
+                        "a generare costi di storage senza fornire " +
+                        "un servizio attivo.",
 
                     Recommendation:
-                        "Verificare se il disco è realmente inutilizzato. " +
-                        "Se non necessario, conservarne uno snapshot quando " +
-                        "richiesto e quindi procedere alla rimozione.",
+                        "Verificare se il disco contiene dati necessari " +
+                        "o se è utilizzato da processi di recovery, " +
+                        "replica o migrazione. Se non necessario, " +
+                        "conservarne una copia quando richiesto e " +
+                        "procedere alla rimozione.",
 
                     ResourceName:
                         resource.Name,
@@ -164,7 +166,7 @@ public sealed class CostAnalyzer : IAnalyzer
             findings.Add(
                 new Finding(
                     Id:
-                        Guid.NewGuid().ToString(),
+                        $"COST-UNUSED-PIP-{resource.Id}",
 
                     Category:
                         Category.Cost,
@@ -183,12 +185,13 @@ public sealed class CostAnalyzer : IAnalyzer
                         "non risulta associato ad alcuna risorsa.",
 
                     Impact:
-                        "Possibile costo ricorrente non necessario " +
-                        "e risorsa inutilizzata nell'ambiente.",
+                        "La risorsa può generare costi ricorrenti " +
+                        "senza essere utilizzata.",
 
                     Recommendation:
-                        "Verificare che l'IP non sia necessario " +
-                        "e rimuoverlo se inutilizzato.",
+                        "Verificare che l'IP pubblico non sia riservato " +
+                        "per una futura configurazione o migrazione. " +
+                        "Se non necessario, procedere alla rimozione.",
 
                     ResourceName:
                         resource.Name,
@@ -209,10 +212,10 @@ public sealed class CostAnalyzer : IAnalyzer
     }
 
     // =========================================================
-    // PUBLIC IP SKU
+    // RETIRED PUBLIC IP SKU
     // =========================================================
 
-    private static void AnalyzePublicIpSku(
+    private static void AnalyzeRetiredPublicIpSku(
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
@@ -246,31 +249,35 @@ public sealed class CostAnalyzer : IAnalyzer
             findings.Add(
                 new Finding(
                     Id:
-                        Guid.NewGuid().ToString(),
+                        $"OPS-PIP-BASIC-SKU-{resource.Id}",
 
                     Category:
-                        Category.Cost,
+                        Category.Operations,
 
                     Severity:
-                        Severity.Low,
+                        Severity.High,
 
                     RuleId:
-                        "COST-PIP-BASIC-SKU",
+                        "OPS-PIP-BASIC-SKU",
 
                     Title:
-                        "Public IP con SKU Basic",
+                        "Public IP con SKU Basic ritirato",
 
                     Description:
                         $"L'IP pubblico '{resource.Name}' " +
-                        "utilizza lo SKU Basic.",
+                        "utilizza lo SKU Basic, ritirato da Azure " +
+                        "il 30 settembre 2025.",
 
                     Impact:
-                        "Lo SKU Basic è una configurazione legacy " +
-                        "e può richiedere migrazione verso Standard.",
+                        "La risorsa utilizza uno SKU ritirato e " +
+                        "non supportato per le normali risorse Azure. " +
+                        "La configurazione può comportare rischi " +
+                        "operativi e di supporto.",
 
                     Recommendation:
-                        "Verificare la compatibilità della configurazione " +
-                        "e pianificare la migrazione a SKU Standard quando necessario.",
+                        "Verificare la configurazione e migrare " +
+                        "l'IP pubblico allo SKU Standard secondo " +
+                        "la procedura Microsoft applicabile.",
 
                     ResourceName:
                         resource.Name,

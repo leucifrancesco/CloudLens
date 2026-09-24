@@ -9,6 +9,16 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
+        if (resources == null)
+        {
+            throw new ArgumentNullException(nameof(resources));
+        }
+
+        if (subscription == null)
+        {
+            throw new ArgumentNullException(nameof(subscription));
+        }
+
         var findings = new List<Finding>();
 
         AnalyzeVirtualMachines(
@@ -30,6 +40,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
 
         return findings;
     }
+
+    // =========================================================
+    // VIRTUAL MACHINES
+    // =========================================================
 
     private static void AnalyzeVirtualMachines(
         IReadOnlyList<AzureResource> resources,
@@ -69,16 +83,16 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
             findings.Add(
                 new Finding(
                     Id:
-                        Guid.NewGuid().ToString(),
+                        $"ARCH-VM-NO-HA-DOMAIN-{vm.Id}",
 
                     Category:
-                        Category.Reliability,
+                        Category.Architecture,
 
                     Severity:
                         Severity.Low,
 
                     RuleId:
-                        "VM-NO-HA-DOMAIN",
+                        "ARCH-VM-NO-HA-DOMAIN",
 
                     Title:
                         "VM senza Availability Zone o Availability Set",
@@ -88,13 +102,16 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                         "ad una Availability Zone o ad un Availability Set.",
 
                     Impact:
-                        "La VM può rimanere maggiormente dipendente " +
-                        "da un singolo failure domain della region.",
+                        "La VM non dispone, a livello di configurazione " +
+                        "rilevata, di una distribuzione esplicita tra " +
+                        "failure domain tramite Availability Zone o " +
+                        "Availability Set.",
 
                     Recommendation:
-                        "Valutare Availability Zone o Availability Set " +
-                        "in funzione dei requisiti di disponibilità " +
-                        "e della regione utilizzata.",
+                        "Verificare i requisiti di disponibilità del " +
+                        "workload. Se richiesto, valutare Availability " +
+                        "Zone, Availability Set o un'architettura " +
+                        "ridondata appropriata.",
 
                     ResourceName:
                         vm.Name,
@@ -106,6 +123,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                         vm.Id));
         }
     }
+
+    // =========================================================
+    // VIRTUAL MACHINE SCALE SETS
+    // =========================================================
 
     private static void AnalyzeVirtualMachineScaleSets(
         IReadOnlyList<AzureResource> resources,
@@ -144,16 +165,16 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                 findings.Add(
                     new Finding(
                         Id:
-                            Guid.NewGuid().ToString(),
+                            $"ARCH-VMSS-NO-ZONE-{scaleSet.Id}",
 
                         Category:
-                            Category.Reliability,
+                            Category.Architecture,
 
                         Severity:
                             Severity.Low,
 
                         RuleId:
-                            "VMSS-NO-ZONE",
+                            "ARCH-VMSS-NO-ZONE",
 
                         Title:
                             "VM Scale Set senza Availability Zone configurata",
@@ -163,12 +184,13 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                             "non risulta associato ad Availability Zone.",
 
                         Impact:
-                            "Le istanze possono rimanere concentrate " +
-                            "in un singolo failure domain.",
+                            "Le istanze del VM Scale Set non risultano " +
+                            "esplicitamente distribuite tra Availability Zone.",
 
                         Recommendation:
-                            "Valutare una configurazione zonale " +
-                            "quando supportata dalla workload architecture.",
+                            "Verificare i requisiti di disponibilità " +
+                            "del workload e valutare una configurazione " +
+                            "zonale quando supportata e necessaria.",
 
                         ResourceName:
                             scaleSet.Name,
@@ -206,7 +228,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                 findings.Add(
                     new Finding(
                         Id:
-                            Guid.NewGuid().ToString(),
+                            $"ARCH-VMSS-SINGLE-INSTANCE-{scaleSet.Id}",
 
                         Category:
                             Category.Reliability,
@@ -215,7 +237,7 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                             Severity.Medium,
 
                         RuleId:
-                            "VMSS-SINGLE-INSTANCE",
+                            "ARCH-VMSS-SINGLE-INSTANCE",
 
                         Title:
                             "VM Scale Set con una sola istanza",
@@ -226,11 +248,14 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
 
                         Impact:
                             "La perdita della singola istanza può " +
-                            "causare indisponibilità del workload.",
+                            "causare indisponibilità del workload " +
+                            "se non esistono altri meccanismi di ridondanza.",
 
                         Recommendation:
-                            "Valutare almeno due istanze quando " +
-                            "il requisito applicativo richiede alta disponibilità.",
+                            "Verificare i requisiti di disponibilità " +
+                            "del workload. Se necessario, configurare " +
+                            "più istanze e verificare il comportamento " +
+                            "del workload durante il failover.",
 
                         ResourceName:
                             scaleSet.Name,
@@ -243,6 +268,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
             }
         }
     }
+
+    // =========================================================
+    // STORAGE REPLICATION
+    // =========================================================
 
     private static void AnalyzeStorageReplication(
         IReadOnlyList<AzureResource> resources,
@@ -290,31 +319,35 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
             findings.Add(
                 new Finding(
                     Id:
-                        Guid.NewGuid().ToString(),
+                        $"ARCH-STORAGE-LRS-{storage.Id}",
 
                     Category:
-                        Category.Reliability,
+                        Category.Architecture,
 
                     Severity:
                         Severity.Low,
 
                     RuleId:
-                        "ST-LRS-REPLICATION",
+                        "ARCH-STORAGE-LRS",
 
                     Title:
                         "Storage Account con replica LRS",
 
                     Description:
                         $"Lo Storage Account '{storage.Name}' " +
-                        "utilizza una replica LRS.",
+                        "utilizza una configurazione di replica LRS.",
 
                     Impact:
-                        "LRS offre una resilienza inferiore rispetto " +
-                        "a configurazioni con ridondanza zonale o geografica.",
+                        "LRS mantiene le copie dei dati all'interno " +
+                        "dello stesso datacenter e non fornisce la " +
+                        "stessa resilienza geografica o zonale di altre " +
+                        "configurazioni di replica.",
 
                     Recommendation:
-                        "Valutare ZRS, GRS o GZRS in funzione dei " +
-                        "requisiti di disponibilità e disaster recovery.",
+                        "Verificare i requisiti di resilienza, " +
+                        "disaster recovery e data residency del workload. " +
+                        "Se necessario, valutare ZRS, GRS o GZRS " +
+                        "compatibilmente con il servizio e il workload.",
 
                     ResourceName:
                         storage.Name,
@@ -326,6 +359,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                         storage.Id));
         }
     }
+
+    // =========================================================
+    // RESOURCE DISTRIBUTION
+    // =========================================================
 
     private static void AnalyzeBasicResourceDistribution(
         IReadOnlyList<AzureResource> resources,
@@ -357,10 +394,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
         findings.Add(
             new Finding(
                 Id:
-                    Guid.NewGuid().ToString(),
+                    $"ARCH-SINGLE-REGION-{subscription.Id}",
 
                 Category:
-                    Category.Reliability,
+                    Category.Architecture,
 
                 Severity:
                     Severity.Low,
@@ -376,12 +413,14 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                     $"nella region '{locations[0]}'.",
 
                 Impact:
-                    "Un singolo failure domain geografico può " +
-                    "aumentare il rischio di indisponibilità.",
+                    "L'utilizzo di una sola region non fornisce " +
+                    "ridondanza geografica tra region Azure.",
 
                 Recommendation:
-                    "Valutare una strategia multi-region quando " +
-                    "i requisiti applicativi lo rendono necessario.",
+                    "Verificare i requisiti di continuità operativa, " +
+                    "disaster recovery, latenza e data residency. " +
+                    "Valutare una strategia multi-region solo quando " +
+                    "richiesta dai requisiti del workload.",
 
                 ResourceName:
                     subscription.Name,
@@ -392,6 +431,10 @@ public sealed class ArchitectureAnalyzer : IAnalyzer
                 ResourceId:
                     subscription.Id));
     }
+
+    // =========================================================
+    // HELPERS
+    // =========================================================
 
     private static bool HasAvailabilityZone(
         JsonElement properties)

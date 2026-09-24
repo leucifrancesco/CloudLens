@@ -197,12 +197,15 @@ private static List<Finding> NormalizeFindings(
         .ToList();
 }
 
-private static List<Finding>
-    ApplyCorrelationSuppression(
-        IReadOnlyList<Finding> findings)
+private static List<Finding> ApplyCorrelationSuppression(
+    IReadOnlyList<Finding> findings)
 {
     var result =
         findings.ToList();
+
+    // =====================================================
+    // VM BACKUP + HA CORRELATION
+    // =====================================================
 
     var correlatedVmIds =
         result
@@ -238,12 +241,14 @@ private static List<Finding>
                             finding.RuleId !=
                                 "OPS-VM-NO-BACKUP" &&
                             finding.RuleId !=
-                                "VM-NO-HA-DOMAIN" &&
-                            finding.RuleId !=
-                                "ARCH-VM-NO-HA-DOMAIN";
+                                "VM-NO-HA-DOMAIN";
                     })
                 .ToList();
     }
+
+    // =====================================================
+    // STORAGE REGION + LRS CORRELATION
+    // =====================================================
 
     var correlatedStorageIds =
         result
@@ -277,9 +282,7 @@ private static List<Finding>
 
                         return
                             finding.RuleId !=
-                                "ST-LRS-REPLICATION" &&
-                            finding.RuleId !=
-                                "ARCH-STORAGE-LRS";
+                                "ST-LRS-REPLICATION";
                     })
                 .ToList();
     }
