@@ -7,6 +7,21 @@ public sealed class MetricAnalyzer
     private const int MinimumSamples =
         24;
 
+    private const double VmHighCpuThreshold =
+        90;
+
+    private const double VmLowCpuThreshold =
+        5;
+
+    private const double SqlHighUtilizationThreshold =
+        90;
+
+    private const double SqlHighStorageThreshold =
+        85;
+
+    private const double StorageLowAvailabilityThreshold =
+        99.9;
+
     public IEnumerable<Finding> Analyze(
         IReadOnlyList<AzureResource> resources,
         IReadOnlyList<MetricProfile> metrics,
@@ -89,7 +104,7 @@ public sealed class MetricAnalyzer
                 continue;
             }
 
-            if (cpu.Average >= 90)
+            if (cpu.Average >= VmHighCpuThreshold)
             {
                 findings.Add(
                     CreateFinding(
@@ -100,7 +115,7 @@ public sealed class MetricAnalyzer
                             Category.Performance,
 
                         severity:
-                            Severity.High,
+                            Severity.Medium,
 
                         ruleId:
                             "VM-CPU-HIGH",
@@ -114,8 +129,9 @@ public sealed class MetricAnalyzer
                             $"su {cpu.SampleCount} campioni.",
 
                         impact:
-                            "La VM potrebbe essere sottodimensionata " +
-                            "o soggetta a carico elevato.",
+                            "L'utilizzo elevato può indicare un carico " +
+                            "importante o un possibile sottodimensionamento " +
+                            "della VM.",
 
                         recommendation:
                             "Verificare il carico applicativo, i picchi " +
@@ -125,7 +141,7 @@ public sealed class MetricAnalyzer
                         metric:
                             cpu));
             }
-            else if (cpu.Average <= 5)
+            else if (cpu.Average <= VmLowCpuThreshold)
             {
                 findings.Add(
                     CreateFinding(
@@ -156,7 +172,8 @@ public sealed class MetricAnalyzer
                         recommendation:
                             "Verificare i pattern di utilizzo, i picchi " +
                             "e i requisiti applicativi prima di valutare " +
-                            "un eventuale ridimensionamento.",
+                            "un eventuale ridimensionamento. La sola CPU " +
+                            "non è sufficiente per determinare il sizing.",
 
                         metric:
                             cpu));
@@ -186,49 +203,6 @@ public sealed class MetricAnalyzer
 
         foreach (var resourceMetrics in appMetrics)
         {
-            var cpu =
-                FindMetric(
-                    resourceMetrics,
-                    "CpuTime");
-
-            if (cpu != null &&
-                cpu.SampleCount >= MinimumSamples &&
-                cpu.Average > 90)
-            {
-                findings.Add(
-                    CreateFinding(
-                        id:
-                            $"METRIC-APP-CPU-HIGH-{cpu.ResourceId}",
-
-                        category:
-                            Category.Performance,
-
-                        severity:
-                            Severity.High,
-
-                        ruleId:
-                            "APP-CPU-HIGH",
-
-                        title:
-                            "App Service con utilizzo CPU elevato",
-
-                        description:
-                            $"L'App Service presenta un utilizzo CPU " +
-                            $"elevato nel periodo analizzato " +
-                            $"su {cpu.SampleCount} campioni.",
-
-                        impact:
-                            "Il carico potrebbe causare degrado delle " +
-                            "prestazioni o saturazione.",
-
-                        recommendation:
-                            "Analizzare il carico e valutare scaling " +
-                            "orizzontale o verticale.",
-
-                        metric:
-                            cpu));
-            }
-
             var errors =
                 FindMetric(
                     resourceMetrics,
@@ -261,12 +235,14 @@ public sealed class MetricAnalyzer
                             $"{errors.SampleCount} campioni.",
 
                         impact:
-                            "Gli errori 5xx indicano possibili problemi " +
-                            "applicativi o infrastrutturali.",
+                            "La presenza persistente di errori HTTP 5xx " +
+                            "può indicare problemi applicativi, infrastrutturali " +
+                            "o nelle dipendenze dell'applicazione.",
 
                         recommendation:
-                            "Analizzare Application Insights, log applicativi " +
-                            "e dipendenze dell'applicazione.",
+                            "Correlare il dato con Application Insights, " +
+                            "log applicativi, dipendenze e pattern di traffico " +
+                            "per identificare la causa degli errori.",
 
                         metric:
                             errors));
@@ -313,7 +289,7 @@ public sealed class MetricAnalyzer
 
             if (utilization != null &&
                 utilization.SampleCount >= MinimumSamples &&
-                utilization.Average >= 90)
+                utilization.Average >= SqlHighUtilizationThreshold)
             {
                 findings.Add(
                     CreateFinding(
@@ -324,7 +300,7 @@ public sealed class MetricAnalyzer
                             Category.Performance,
 
                         severity:
-                            Severity.High,
+                            Severity.Medium,
 
                         ruleId:
                             "SQL-UTILIZATION-HIGH",
@@ -339,12 +315,13 @@ public sealed class MetricAnalyzer
                             $"{utilization.SampleCount} campioni.",
 
                         impact:
-                            "L'elevato utilizzo può causare degrado delle " +
+                            "L'elevato utilizzo può indicare un carico " +
+                            "importante e contribuire al degrado delle " +
                             "prestazioni.",
 
                         recommendation:
-                            "Verificare query, workload e dimensionamento " +
-                            "del database.",
+                            "Verificare query, workload, pattern di utilizzo " +
+                            "e dimensionamento del database.",
 
                         metric:
                             utilization));
@@ -357,7 +334,7 @@ public sealed class MetricAnalyzer
 
             if (storage != null &&
                 storage.SampleCount >= MinimumSamples &&
-                storage.Average >= 85)
+                storage.Average >= SqlHighStorageThreshold)
             {
                 findings.Add(
                     CreateFinding(
@@ -383,11 +360,12 @@ public sealed class MetricAnalyzer
 
                         impact:
                             "La crescita dello storage può portare " +
-                            "a saturazione della capacità disponibile.",
+                            "alla saturazione della capacità disponibile.",
 
                         recommendation:
                             "Verificare la crescita dei dati e pianificare " +
-                            "un intervento sul dimensionamento.",
+                            "un intervento sul dimensionamento o sulla gestione " +
+                            "dello storage.",
 
                         metric:
                             storage));
@@ -424,7 +402,7 @@ public sealed class MetricAnalyzer
 
             if (availability != null &&
                 availability.SampleCount >= MinimumSamples &&
-                availability.Average < 99)
+                availability.Average < StorageLowAvailabilityThreshold)
             {
                 findings.Add(
                     CreateFinding(
@@ -450,11 +428,12 @@ public sealed class MetricAnalyzer
 
                         impact:
                             "Una disponibilità ridotta può indicare " +
-                            "problemi di servizio o accesso.",
+                            "problemi di servizio o di accesso alle risorse " +
+                            "di storage.",
 
                         recommendation:
-                            "Verificare Azure Service Health, diagnostica " +
-                            "e pattern di accesso.",
+                            "Verificare Azure Service Health, diagnostica, " +
+                            "pattern di accesso e eventuali errori correlati.",
 
                         metric:
                             availability));
@@ -494,7 +473,7 @@ public sealed class MetricAnalyzer
 
             if (throttled != null &&
                 throttled.SampleCount >= MinimumSamples &&
-                throttled.Maximum > 0)
+                throttled.Average > 0)
             {
                 findings.Add(
                     CreateFinding(
@@ -502,7 +481,7 @@ public sealed class MetricAnalyzer
                             $"METRIC-MESSAGING-THROTTLING-{throttled.ResourceId}",
 
                         category:
-                            Category.Operations,
+                            Category.Performance,
 
                         severity:
                             Severity.Medium,
@@ -514,17 +493,18 @@ public sealed class MetricAnalyzer
                             "Servizio messaging con richieste throttled",
 
                         description:
-                            $"Sono stati rilevati eventi di throttling " +
-                            $"su {throttled.SampleCount} campioni " +
-                            $"per {throttled.MetricName}.",
+                            $"È stata rilevata una media di " +
+                            $"{throttled.Average:F2} richieste throttled " +
+                            $"per campione nel periodo analizzato, " +
+                            $"su {throttled.SampleCount} campioni.",
 
                         impact:
-                            "Il throttling può causare ritardi o errori " +
-                            "nelle operazioni applicative.",
+                            "Il throttling persistente può causare ritardi " +
+                            "o errori nelle operazioni applicative.",
 
                         recommendation:
-                            "Verificare il workload e il dimensionamento " +
-                            "del namespace.",
+                            "Verificare il workload, i pattern di utilizzo " +
+                            "e il dimensionamento del namespace.",
 
                         metric:
                             throttled));

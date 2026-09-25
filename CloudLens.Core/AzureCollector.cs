@@ -597,6 +597,9 @@ public sealed class AzureCollector
         var metricProfiles =
             new List<MetricProfile>();
 
+        var metricCoverage =
+            new List<MetricResourceCoverage>();
+
         var monitorClient =
             new AzureMonitorClient(
                 _http,
@@ -609,10 +612,16 @@ public sealed class AzureCollector
 
         try
         {
-            metricProfiles =
-                await monitorClient.GetMetricsAsync(
+            var metricCollection =
+                await monitorClient.GetMetricCollectionAsync(
                     rawResources,
                     cancellationToken);
+
+            metricProfiles =
+                metricCollection.Profiles.ToList();
+
+            metricCoverage =
+                metricCollection.Resources.ToList();
         }
         catch (OperationCanceledException)
         {
@@ -693,6 +702,7 @@ public sealed class AzureCollector
             PrintScanDiagnostics(
                 resources,
                 metricProfiles,
+                metricCoverage,
                 resourceGraph);
         }
         catch (Exception ex)
@@ -817,6 +827,7 @@ public sealed class AzureCollector
     private static void PrintScanDiagnostics(
         IReadOnlyList<AzureResource> resources,
         IReadOnlyList<MetricProfile> metricProfiles,
+        IReadOnlyList<MetricResourceCoverage> metricCoverage,
         AzureResourceGraph resourceGraph)
     {
         Console.WriteLine();
@@ -832,6 +843,34 @@ public sealed class AzureCollector
 
         Console.WriteLine(
             $"Metriche raccolte: {metricProfiles.Count}");
+
+        Console.WriteLine();
+
+        // -----------------------------------------------------
+        // METRIC COLLECTION COVERAGE
+        // -----------------------------------------------------
+
+        Console.WriteLine(
+            "METRIC COLLECTION COVERAGE:");
+
+        Console.WriteLine();
+
+        foreach (var coverage in metricCoverage)
+        {
+            Console.WriteLine(
+                $"{coverage.ResourceName} | " +
+                $"{coverage.ResourceType} | " +
+                $"Status={coverage.Status} | " +
+                $"Definitions={coverage.AvailableMetricDefinitions} | " +
+                $"Profiles={coverage.CollectedMetricProfiles}");
+
+            if (!string.IsNullOrWhiteSpace(
+                    coverage.Error))
+            {
+                Console.WriteLine(
+                    $"  ERROR: {coverage.Error}");
+            }
+        }
 
         Console.WriteLine();
 

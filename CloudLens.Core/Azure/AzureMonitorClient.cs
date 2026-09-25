@@ -144,6 +144,16 @@ public sealed class AzureMonitorClient
 
         if (string.IsNullOrWhiteSpace(resourceId))
         {
+            coverage.Add(
+                new MetricResourceCoverage(
+                    string.Empty,
+                    resourceName,
+                    resourceType,
+                    0,
+                    0,
+                    MetricCoverageStatus.Error,
+                    "Resource ID mancante."));
+
             return;
         }
 
@@ -196,7 +206,9 @@ public sealed class AzureMonitorClient
             }
 
             var collectedMetrics = 0;
-            var metricErrors = new List<string>();
+
+            var metricErrors =
+                new List<string>();
 
             foreach (var definition in definitions)
             {
@@ -293,7 +305,15 @@ public sealed class AzureMonitorClient
 
         if (!response.IsSuccessStatusCode)
         {
-            return [];
+            var errorBody =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            throw new HttpRequestException(
+                $"Metric definitions HTTP {(int)response.StatusCode} " +
+                $"{response.ReasonPhrase}. " +
+                $"Resource: {resourceId}. " +
+                $"Response: {errorBody}");
         }
 
         var body =
@@ -397,7 +417,16 @@ public sealed class AzureMonitorClient
 
         if (!response.IsSuccessStatusCode)
         {
-            return [];
+            var errorBody =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            throw new HttpRequestException(
+                $"Metrics HTTP {(int)response.StatusCode} " +
+                $"{response.ReasonPhrase}. " +
+                $"Resource: {resourceId}. " +
+                $"Metric: {definition.Name}. " +
+                $"Response: {errorBody}");
         }
 
         var body =

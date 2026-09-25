@@ -18,7 +18,6 @@ public sealed class SecurityAnalyzer : IAnalyzer
         var findings = new List<Finding>();
 
         AnalyzeNsgs(resources, findings);
-        AnalyzePublicIps(resources, findings);
         AnalyzeStorageAccounts(resources, findings);
         AnalyzeKeyVaults(resources, findings);
         AnalyzeSqlServers(resources, findings);
@@ -36,8 +35,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                          r,
                          "Microsoft.Network/networkSecurityGroups")))
         {
-            var properties =
-                nsg.GetEffectiveProperties();
+            var properties = nsg.GetEffectiveProperties();
 
             if (!properties.HasValue ||
                 !properties.Value.TryGetProperty(
@@ -53,15 +51,13 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 if (!IsInboundAllowRule(rule))
                     continue;
 
-                var source =
-                    GetString(
-                        rule,
-                        "sourceAddressPrefix");
+                var source = GetString(
+                    rule,
+                    "sourceAddressPrefix");
 
-                var sourcePrefixes =
-                    GetStringArray(
-                        rule,
-                        "sourceAddressPrefixes");
+                var sourcePrefixes = GetStringArray(
+                    rule,
+                    "sourceAddressPrefixes");
 
                 var internetExposed =
                     string.Equals(
@@ -83,16 +79,13 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 if (!internetExposed)
                     continue;
 
-                var ports =
-                    new List<string>();
+                var ports = new List<string>();
 
-                var destinationPort =
-                    GetString(
-                        rule,
-                        "destinationPortRange");
+                var destinationPort = GetString(
+                    rule,
+                    "destinationPortRange");
 
-                if (!string.IsNullOrWhiteSpace(
-                        destinationPort))
+                if (!string.IsNullOrWhiteSpace(destinationPort))
                 {
                     ports.Add(destinationPort);
                 }
@@ -149,31 +142,6 @@ public sealed class SecurityAnalyzer : IAnalyzer
         }
     }
 
-    private static void AnalyzePublicIps(
-        IReadOnlyList<AzureResource> resources,
-        List<Finding> findings)
-    {
-        foreach (var pip in resources.Where(
-                     r => IsType(
-                         r,
-                         "Microsoft.Network/publicIPAddresses")))
-        {
-            if (pip.Relationships.Any())
-                continue;
-
-            Add(
-                findings,
-                pip,
-                Category.Cost,
-                "SEC-PIP-UNUSED",
-                Severity.Low,
-                "Public IP non associata rilevata",
-                "La Public IP non presenta relazioni verso risorse individuate.",
-                "Una Public IP inutilizzata può rappresentare un costo e una risorsa amministrativa non necessaria.",
-                "Verificare la risorsa e rimuoverla se non più necessaria.");
-        }
-    }
-
     private static void AnalyzeStorageAccounts(
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
@@ -183,8 +151,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                          r,
                          "Microsoft.Storage/storageAccounts")))
         {
-            var properties =
-                storage.GetEffectiveProperties();
+            var properties = storage.GetEffectiveProperties();
 
             if (!properties.HasValue)
                 continue;
@@ -223,10 +190,9 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     "Abilitare il requisito HTTPS-only.");
             }
 
-            var minimumTls =
-                GetString(
-                    properties.Value,
-                    "minimumTlsVersion");
+            var minimumTls = GetString(
+                properties.Value,
+                "minimumTlsVersion");
 
             if (string.Equals(
                     minimumTls,
@@ -248,6 +214,27 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     "Versioni TLS obsolete riducono il livello di sicurezza delle connessioni.",
                     "Portare il minimum TLS version ad almeno TLS 1.2 verificando la compatibilità dei client.");
             }
+
+            var publicNetworkAccess = GetString(
+                properties.Value,
+                "publicNetworkAccess");
+
+            if (string.Equals(
+                    publicNetworkAccess,
+                    "Enabled",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                Add(
+                    findings,
+                    storage,
+                    Category.Security,
+                    "SEC-STORAGE-PUBLIC-NETWORK",
+                    Severity.Low,
+                    "Storage Account accessibile tramite rete pubblica",
+                    "La Storage Account consente accesso tramite rete pubblica.",
+                    "La superficie di rete è maggiore rispetto a un'architettura completamente privata.",
+                    "Valutare firewall, virtual network rules e Private Endpoint.");
+            }
         }
     }
 
@@ -255,33 +242,23 @@ public sealed class SecurityAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
-        var vaults =
-            resources.Where(
-                r => IsType(
-                    r,
-                    "Microsoft.KeyVault/vaults"));
-
-        foreach (var resource in vaults)
+        foreach (var resource in resources.Where(
+                     r => IsType(
+                         r,
+                         "Microsoft.KeyVault/vaults")))
         {
-            var properties =
-                resource.GetEffectiveProperties();
+            var properties = resource.GetEffectiveProperties();
 
             if (!properties.HasValue)
                 continue;
 
-            // =====================================================
-            // PUBLIC NETWORK ACCESS
-            // =====================================================
+            var publicNetworkAccess = GetString(
+                properties.Value,
+                "publicNetworkAccess");
 
-            var publicNetworkAccess =
-                GetString(
-                    properties.Value,
-                    "publicNetworkAccess");
-
-            var networkAcls =
-                GetProperty(
-                    properties.Value,
-                    "networkAcls");
+            var networkAcls = GetProperty(
+                properties.Value,
+                "networkAcls");
 
             var defaultAction =
                 networkAcls.HasValue
@@ -302,91 +279,37 @@ public sealed class SecurityAnalyzer : IAnalyzer
                     "Deny",
                     StringComparison.OrdinalIgnoreCase);
 
-            if (publiclyAccessible &&
-                !networkRestricted)
+            if (publiclyAccessible && !networkRestricted)
             {
-                findings.Add(
-                    new Finding(
-                        Id:
-                            Guid.NewGuid().ToString(),
-
-                        Category:
-                            Category.Security,
-
-                        Severity:
-                            Severity.Medium,
-
-                        RuleId:
-                            "SEC-KV-PUBLIC-NETWORK",
-
-                        Title:
-                            "Key Vault accessibile dalla rete pubblica senza restrizioni di rete",
-
-                        Description:
-                            $"Il Key Vault '{ResourceName(resource)}' consente l'accesso tramite rete pubblica e non risulta configurato con una policy network ACL predefinita di tipo Deny.",
-
-                        Impact:
-                            "Aumenta la superficie di esposizione di segreti, chiavi e certificati.",
-
-                        Recommendation:
-                            "Valutare Private Endpoint oppure configurare network ACL con default action Deny e consentire esplicitamente solo le reti necessarie.",
-
-                        ResourceName:
-                            ResourceName(resource),
-
-                        ResourceType:
-                            ResourceType(resource),
-
-                        ResourceId:
-                            ResourceId(resource)));
+                Add(
+                    findings,
+                    resource,
+                    Category.Security,
+                    "SEC-KV-PUBLIC-NETWORK",
+                    Severity.Medium,
+                    "Key Vault accessibile dalla rete pubblica senza restrizioni di rete",
+                    $"Il Key Vault '{resource.Name}' consente l'accesso tramite rete pubblica e non risulta configurato con una policy network ACL predefinita di tipo Deny.",
+                    "Aumenta la superficie di esposizione di segreti, chiavi e certificati.",
+                    "Valutare Private Endpoint oppure configurare network ACL con default action Deny e consentire esplicitamente solo le reti necessarie.");
             }
 
-            // =====================================================
-            // PURGE PROTECTION
-            // =====================================================
+            var purgeProtection = GetBool(
+                properties.Value,
+                "enablePurgeProtection",
+                true);
 
-            var purgeProtection =
-                GetBool(
-                    properties.Value,
-                    "enablePurgeProtection",
-                    true);
-
-            if (purgeProtection == false)
+            if (!purgeProtection)
             {
-                findings.Add(
-                    new Finding(
-                        Id:
-                            Guid.NewGuid().ToString(),
-
-                        Category:
-                            Category.Security,
-
-                        Severity:
-                            Severity.Medium,
-
-                        RuleId:
-                            "SEC-KV-NO-PURGE",
-
-                        Title:
-                            "Key Vault senza purge protection",
-
-                        Description:
-                            $"Il Key Vault '{ResourceName(resource)}' non espone la purge protection come abilitata.",
-
-                        Impact:
-                            "Una cancellazione potrebbe diventare definitiva prima del termine della retention.",
-
-                        Recommendation:
-                            "Abilitare la purge protection quando richiesta dai requisiti di sicurezza e continuità operativa.",
-
-                        ResourceName:
-                            ResourceName(resource),
-
-                        ResourceType:
-                            ResourceType(resource),
-
-                        ResourceId:
-                            ResourceId(resource)));
+                Add(
+                    findings,
+                    resource,
+                    Category.Security,
+                    "SEC-KV-NO-PURGE",
+                    Severity.Medium,
+                    "Key Vault senza purge protection",
+                    $"Il Key Vault '{resource.Name}' non espone la purge protection come abilitata.",
+                    "Una cancellazione potrebbe diventare definitiva prima del termine della retention.",
+                    "Abilitare la purge protection quando richiesta dai requisiti di sicurezza e continuità operativa.");
             }
         }
     }
@@ -400,16 +323,14 @@ public sealed class SecurityAnalyzer : IAnalyzer
                          r,
                          "Microsoft.Sql/servers")))
         {
-            var properties =
-                sql.GetEffectiveProperties();
+            var properties = sql.GetEffectiveProperties();
 
             if (!properties.HasValue)
                 continue;
 
-            var publicNetworkAccess =
-                GetString(
-                    properties.Value,
-                    "publicNetworkAccess");
+            var publicNetworkAccess = GetString(
+                properties.Value,
+                "publicNetworkAccess");
 
             if (string.Equals(
                     publicNetworkAccess,
@@ -439,8 +360,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                          r,
                          "Microsoft.Web/sites")))
         {
-            var properties =
-                app.GetEffectiveProperties();
+            var properties = app.GetEffectiveProperties();
 
             if (!properties.HasValue)
                 continue;
@@ -467,15 +387,13 @@ public sealed class SecurityAnalyzer : IAnalyzer
     private static bool IsInboundAllowRule(
         JsonElement rule)
     {
-        var access =
-            GetString(
-                rule,
-                "access");
+        var access = GetString(
+            rule,
+            "access");
 
-        var direction =
-            GetString(
-                rule,
-                "direction");
+        var direction = GetString(
+            rule,
+            "direction");
 
         return string.Equals(
                    access,
@@ -487,27 +405,20 @@ public sealed class SecurityAnalyzer : IAnalyzer
                    StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsAnyPort(
-        string port)
+    private static bool IsAnyPort(string port)
     {
         return port == "*" ||
                port == "0-65535";
     }
 
-    private static bool ContainsSsh(
-        string port)
+    private static bool ContainsSsh(string port)
     {
-        return ContainsPort(
-            port,
-            22);
+        return ContainsPort(port, 22);
     }
 
-    private static bool ContainsRdp(
-        string port)
+    private static bool ContainsRdp(string port)
     {
-        return ContainsPort(
-            port,
-            3389);
+        return ContainsPort(port, 3389);
     }
 
     private static bool ContainsPort(
@@ -530,8 +441,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
                 return true;
             }
 
-            var range =
-                token.Split('-');
+            var range = token.Split('-');
 
             if (range.Length == 2 &&
                 int.TryParse(
@@ -589,8 +499,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
         JsonElement element,
         string name)
     {
-        var result =
-            new List<string>();
+        var result = new List<string>();
 
         if (!element.TryGetProperty(
                 name,
@@ -605,8 +514,7 @@ public sealed class SecurityAnalyzer : IAnalyzer
             if (item.ValueKind != JsonValueKind.String)
                 continue;
 
-            var value =
-                item.GetString();
+            var value = item.GetString();
 
             if (!string.IsNullOrWhiteSpace(value))
             {
@@ -639,24 +547,6 @@ public sealed class SecurityAnalyzer : IAnalyzer
             resource.Type,
             type,
             StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string ResourceName(
-        AzureResource resource)
-    {
-        return resource.Name;
-    }
-
-    private static string ResourceType(
-        AzureResource resource)
-    {
-        return resource.Type;
-    }
-
-    private static string ResourceId(
-        AzureResource resource)
-    {
-        return resource.Id;
     }
 
     private static void Add(
