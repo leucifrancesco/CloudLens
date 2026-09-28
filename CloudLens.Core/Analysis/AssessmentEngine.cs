@@ -4,517 +4,522 @@ namespace CloudLens.Core.Analysis;
 
 public sealed class AssessmentEngine
 {
-private readonly IReadOnlyList<IAnalyzer> _analyzers;
-private readonly MetricAnalyzer _metricAnalyzer;
-private readonly RemediationEngine _remediationEngine;
+    private readonly IReadOnlyList<IAnalyzer> _analyzers;
+    private readonly MetricAnalyzer _metricAnalyzer;
+    private readonly RemediationEngine _remediationEngine;
 
-public AssessmentEngine(
-    IEnumerable<IAnalyzer> analyzers)
-{
-    if (analyzers == null)
+    public AssessmentEngine(
+        IEnumerable<IAnalyzer> analyzers)
     {
-        throw new ArgumentNullException(
-            nameof(analyzers));
+        if (analyzers == null)
+        {
+            throw new ArgumentNullException(
+                nameof(analyzers));
+        }
+
+        var registered =
+            analyzers
+                .Where(analyzer => analyzer != null)
+                .ToList();
+
+        if (!registered.Any(
+                analyzer =>
+                    analyzer is ServiceConfigurationAnalyzer))
+        {
+            registered.Add(
+                new ServiceConfigurationAnalyzer());
+        }
+
+        _analyzers = registered;
+
+        if (_analyzers.Count == 0)
+        {
+            throw new ArgumentException(
+                "È necessario registrare almeno un analyzer.",
+                nameof(analyzers));
+        }
+
+        _metricAnalyzer =
+            new MetricAnalyzer();
+
+        _remediationEngine =
+            new RemediationEngine();
     }
 
-    var registered =
-        analyzers
-            .Where(analyzer => analyzer != null)
-            .ToList();
-
-    if (!registered.Any(
-            analyzer =>
-                analyzer is ServiceConfigurationAnalyzer))
+    public ScanResult Analyze(
+        IReadOnlyList<AzureResource> resources,
+        AzureSubscription subscription)
     {
-        registered.Add(
-            new ServiceConfigurationAnalyzer());
-    }
-
-    _analyzers = registered;
-
-    if (_analyzers.Count == 0)
-    {
-        throw new ArgumentException(
-            "È necessario registrare almeno un analyzer.",
-            nameof(analyzers));
-    }
-
-    _metricAnalyzer =
-        new MetricAnalyzer();
-
-    _remediationEngine =
-        new RemediationEngine();
-}
-
-public ScanResult Analyze(
-    IReadOnlyList<AzureResource> resources,
-    AzureSubscription subscription)
-{
-    return Analyze(
-        resources,
-        subscription,
-        []);
-}
-
-public ScanResult Analyze(
-    IReadOnlyList<AzureResource> resources,
-    AzureSubscription subscription,
-    IReadOnlyList<MetricProfile> metrics)
-{
-    if (resources == null)
-    {
-        throw new ArgumentNullException(
-            nameof(resources));
-    }
-
-    if (subscription == null)
-    {
-        throw new ArgumentNullException(
-            nameof(subscription));
-    }
-
-    if (metrics == null)
-    {
-        throw new ArgumentNullException(
-            nameof(metrics));
-    }
-
-    var findings =
-        CollectFindings(
+        return Analyze(
             resources,
-            subscription);
-
-    if (metrics.Count > 0)
-    {
-        findings.AddRange(
-            _metricAnalyzer.Analyze(
-                resources,
-                metrics,
-                subscription));
+            subscription,
+            []);
     }
 
-    var normalizedFindings =
-        NormalizeFindings(findings);
-
-    normalizedFindings =
-        ApplyCorrelationSuppression(
-            normalizedFindings);
-
-    var stats =
-        BuildStats(
-            resources,
-            metrics);
-
-    var scores =
-        ComputeScores(
-            normalizedFindings);
-
-    var overallScore =
-        CalculateOverallScore(scores);
-
-    var remediationPlan =
-        _remediationEngine.BuildPlan(
-            normalizedFindings);
-
-    return new ScanResult
+    public ScanResult Analyze(
+        IReadOnlyList<AzureResource> resources,
+        AzureSubscription subscription,
+        IReadOnlyList<MetricProfile> metrics)
     {
-        SubscriptionName =
-            subscription.Name,
+        if (resources == null)
+        {
+            throw new ArgumentNullException(
+                nameof(resources));
+        }
 
-        SubscriptionId =
-            subscription.Id,
+        if (subscription == null)
+        {
+            throw new ArgumentNullException(
+                nameof(subscription));
+        }
 
-        Stats =
-            stats,
+        if (metrics == null)
+        {
+            throw new ArgumentNullException(
+                nameof(metrics));
+        }
 
-        Findings =
-            normalizedFindings,
-
-        ScoresByCategory =
-            scores,
-
-        Score =
-            overallScore,
-
-        MetricProfiles =
-            metrics.ToList(),
-
-        Remediation =
-            remediationPlan
-    };
-}
-
-private List<Finding> CollectFindings(
-    IReadOnlyList<AzureResource> resources,
-    AzureSubscription subscription)
-{
-    var findings =
-        new List<Finding>();
-
-    foreach (var analyzer in _analyzers)
-    {
-        var analyzerFindings =
-            analyzer.Analyze(
+        var findings =
+            CollectFindings(
                 resources,
                 subscription);
 
-        if (analyzerFindings == null)
+        if (metrics.Count > 0)
         {
-            continue;
+            findings.AddRange(
+                _metricAnalyzer.Analyze(
+                    resources,
+                    metrics,
+                    subscription));
         }
 
-        findings.AddRange(
-            analyzerFindings);
+        var normalizedFindings =
+            NormalizeFindings(findings);
+
+        normalizedFindings =
+            ApplyCorrelationSuppression(
+                normalizedFindings);
+
+        var stats =
+            BuildStats(
+                resources,
+                metrics);
+
+        var scores =
+            ComputeScores(
+                normalizedFindings);
+
+        var overallScore =
+            CalculateOverallScore(scores);
+
+        var remediationPlan =
+            _remediationEngine.BuildPlan(
+                normalizedFindings);
+
+        return new ScanResult
+        {
+            SubscriptionName =
+                subscription.Name,
+
+            SubscriptionId =
+                subscription.Id,
+
+            Stats =
+                stats,
+
+            Findings =
+                normalizedFindings,
+
+            ScoresByCategory =
+                scores,
+
+            Score =
+                overallScore,
+
+            MetricProfiles =
+                metrics.ToList(),
+
+            Remediation =
+                remediationPlan
+        };
     }
 
-    return findings;
-}
-
-private static List<Finding> NormalizeFindings(
-    IEnumerable<Finding> findings)
-{
-    return findings
-        .Where(finding => finding != null)
-        .GroupBy(
-            GetFindingKey,
-            StringComparer.OrdinalIgnoreCase)
-        .Select(group => group.First())
-        .OrderBy(
-            finding =>
-                GetSeverityOrder(
-                    finding.Severity))
-        .ThenBy(
-            finding => finding.Category)
-        .ThenBy(
-            finding => finding.ResourceType,
-            StringComparer.OrdinalIgnoreCase)
-        .ThenBy(
-            finding => finding.ResourceName,
-            StringComparer.OrdinalIgnoreCase)
-        .ThenBy(
-            finding => finding.RuleId,
-            StringComparer.OrdinalIgnoreCase)
-        .ToList();
-}
-
-private static List<Finding> ApplyCorrelationSuppression(
-    IReadOnlyList<Finding> findings)
-{
-    var result =
-        findings.ToList();
-
-    // =====================================================
-    // VM BACKUP + HA CORRELATION
-    // =====================================================
-
-    var correlatedVmIds =
-        result
-            .Where(
-                finding =>
-                    finding.RuleId ==
-                    "CORR-VM-NO-BACKUP-NO-HA")
-            .Select(
-                finding =>
-                    finding.ResourceId)
-            .Where(
-                resourceId =>
-                    !string.IsNullOrWhiteSpace(
-                        resourceId))
-            .ToHashSet(
-                StringComparer.OrdinalIgnoreCase);
-
-    if (correlatedVmIds.Count > 0)
+    private List<Finding> CollectFindings(
+        IReadOnlyList<AzureResource> resources,
+        AzureSubscription subscription)
     {
-        result =
-            result
-                .Where(
-                    finding =>
-                    {
-                        if (!correlatedVmIds.Contains(
-                                finding.ResourceId ??
-                                string.Empty))
-                        {
-                            return true;
-                        }
+        var findings =
+            new List<Finding>();
 
-                        return
-                            finding.RuleId !=
-                                "OPS-VM-NO-BACKUP" &&
-                            finding.RuleId !=
-                                "VM-NO-HA-DOMAIN";
-                    })
-                .ToList();
+        foreach (var analyzer in _analyzers)
+        {
+            var analyzerFindings =
+                analyzer.Analyze(
+                    resources,
+                    subscription);
+
+            if (analyzerFindings == null)
+            {
+                continue;
+            }
+
+            findings.AddRange(
+                analyzerFindings);
+        }
+
+        return findings;
     }
 
-    // =====================================================
-    // STORAGE REGION + LRS CORRELATION
-    // =====================================================
-
-    var correlatedStorageIds =
-        result
-            .Where(
-                finding =>
-                    finding.RuleId ==
-                    "CORR-STORAGE-SINGLE-REGION-LRS")
-            .Select(
-                finding =>
-                    finding.ResourceId)
-            .Where(
-                resourceId =>
-                    !string.IsNullOrWhiteSpace(
-                        resourceId))
-            .ToHashSet(
-                StringComparer.OrdinalIgnoreCase);
-
-    if (correlatedStorageIds.Count > 0)
+    private static List<Finding> NormalizeFindings(
+        IEnumerable<Finding> findings)
     {
-        result =
-            result
-                .Where(
-                    finding =>
-                    {
-                        if (!correlatedStorageIds.Contains(
-                                finding.ResourceId ??
-                                string.Empty))
-                        {
-                            return true;
-                        }
-
-                        return
-                            finding.RuleId !=
-                                "ST-LRS-REPLICATION";
-                    })
-                .ToList();
-    }
-
-    return result;
-}
-
-private static string GetFindingKey(
-    Finding finding)
-{
-    var resourceKey =
-        !string.IsNullOrWhiteSpace(
-            finding.ResourceId)
-            ? finding.ResourceId
-            : finding.ResourceName;
-
-    return
-        $"{finding.RuleId}|{resourceKey}";
-}
-
-private static int GetSeverityOrder(
-    Severity severity)
-{
-    return severity switch
-    {
-        Severity.Critical => 0,
-        Severity.High => 1,
-        Severity.Medium => 2,
-        Severity.Low => 3,
-        _ => 4
-    };
-}
-
-private static ScanStats BuildStats(
-    IReadOnlyList<AzureResource> resources,
-    IReadOnlyList<MetricProfile> metrics)
-{
-    return new ScanStats
-    {
-        Resources =
-            resources.Count,
-
-        ResourceTypes =
-            resources
-                .Select(x => x.Type)
-                .Distinct(
-                    StringComparer.OrdinalIgnoreCase)
-                .Count(),
-
-        EnrichedResources =
-            resources.Count(
-                resource =>
-                    resource.Enrichment?.Success ==
-                    true),
-
-        Relationships =
-            resources.Sum(
-                resource =>
-                    resource.Relationships.Count),
-
-        MetricProfiles =
-            metrics.Count,
-
-        Vms =
-            resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Compute/virtualMachines")),
-
-        Disks =
-            resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Compute/disks")),
-
-        Nsgs =
-            resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Network/networkSecurityGroups")),
-
-        PublicIps =
-            resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Network/publicIPAddresses")),
-
-        StorageAccounts =
-            resources.Count(
-                resource =>
-                    TypeEquals(
-                        resource,
-                        "Microsoft.Storage/storageAccounts")),
-
-        Advisor = 0,
-        MonthlyCostEur = 0
-    };
-}
-
-private static Dictionary<Category, int> ComputeScores(
-    IReadOnlyList<Finding> findings)
-{
-    var result =
-        new Dictionary<Category, int>();
-
-    foreach (var category in
-             Enum.GetValues<Category>())
-    {
-        var categoryFindings =
-            findings
-                .Where(
-                    finding =>
-                        finding.Category ==
-                        category)
-                .ToList();
-
-        var penalty =
-            CalculateCategoryPenalty(
-                categoryFindings);
-
-        result[category] =
-            Math.Max(
-                0,
-                100 - penalty);
-    }
-
-    return result;
-}
-
-private static int CalculateCategoryPenalty(
-    IReadOnlyList<Finding> findings)
-{
-    if (findings.Count == 0)
-    {
-        return 0;
-    }
-
-    var totalPenalty =
-        0.0;
-
-    var resourceGroups =
-        findings
+        return findings
+            .Where(finding => finding != null)
             .GroupBy(
-                GetResourceRiskKey,
-                StringComparer.OrdinalIgnoreCase);
+                GetFindingKey,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(
+                finding =>
+                    GetSeverityOrder(
+                        finding.Severity))
+            .ThenBy(
+                finding => finding.Category)
+            .ThenBy(
+                finding => finding.ResourceType,
+                StringComparer.OrdinalIgnoreCase)
+            .ThenBy(
+                finding => finding.ResourceName,
+                StringComparer.OrdinalIgnoreCase)
+            .ThenBy(
+                finding => finding.RuleId,
+                StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
-    foreach (var resourceGroup in resourceGroups)
+    private static List<Finding> ApplyCorrelationSuppression(
+        IReadOnlyList<Finding> findings)
     {
-        var penalties =
-            resourceGroup
+        var result =
+            findings.ToList();
+
+        // =====================================================
+        // VM BACKUP + HA CORRELATION
+        // =====================================================
+        //
+        // The correlation finding represents the combined
+        // resilience risk. If it exists for a VM, suppress the
+        // individual backup and HA findings for that same VM.
+
+        var correlatedVmIds =
+            result
+                .Where(
+                    finding =>
+                        string.Equals(
+                            finding.RuleId,
+                            "CORR-VM-NO-BACKUP-NO-HA",
+                            StringComparison.OrdinalIgnoreCase))
                 .Select(
                     finding =>
-                        GetSeverityPenalty(
-                            finding.Severity))
-                .OrderByDescending(
-                    penalty => penalty)
-                .ToList();
+                        finding.ResourceId)
+                .Where(
+                    resourceId =>
+                        !string.IsNullOrWhiteSpace(
+                            resourceId))
+                .ToHashSet(
+                    StringComparer.OrdinalIgnoreCase);
 
-        for (var index = 0;
-             index < penalties.Count;
-             index++)
+        if (correlatedVmIds.Count > 0)
         {
-            var multiplier =
-                index switch
-                {
-                    0 => 1.00,
-                    1 => 0.60,
-                    2 => 0.40,
-                    _ => 0.25
-                };
+            result =
+                result
+                    .Where(
+                        finding =>
+                        {
+                            if (!correlatedVmIds.Contains(
+                                    finding.ResourceId ??
+                                    string.Empty))
+                            {
+                                return true;
+                            }
 
-            totalPenalty +=
-                penalties[index] *
-                multiplier;
+                            return
+                                !string.Equals(
+                                    finding.RuleId,
+                                    "OPS-VM-NO-BACKUP",
+                                    StringComparison.OrdinalIgnoreCase)
+                                &&
+                                !string.Equals(
+                                    finding.RuleId,
+                                    "ARCH-VM-NO-HA-DOMAIN",
+                                    StringComparison.OrdinalIgnoreCase);
+                        })
+                    .ToList();
         }
+
+        // =====================================================
+        // STORAGE SINGLE-REGION + LRS CORRELATION
+        // =====================================================
+        //
+        // CORR-STORAGE-SINGLE-REGION-LRS is now an aggregated
+        // environment-level finding. It already contains the
+        // list of affected Storage Accounts.
+        //
+        // Therefore, when the correlation exists, individual
+        // ARCH-STORAGE-LRS findings are suppressed.
+        //
+        // ARCH-SINGLE-REGION remains visible because it describes
+        // the broader subscription-level architecture.
+
+        var hasStorageCorrelation =
+            result.Any(
+                finding =>
+                    string.Equals(
+                        finding.RuleId,
+                        "CORR-STORAGE-SINGLE-REGION-LRS",
+                        StringComparison.OrdinalIgnoreCase));
+
+        if (hasStorageCorrelation)
+        {
+            result =
+                result
+                    .Where(
+                        finding =>
+                            !string.Equals(
+                                finding.RuleId,
+                                "ARCH-STORAGE-LRS",
+                                StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+        }
+
+        return result;
     }
 
-    return (int)Math.Round(
-        Math.Min(
-            100,
-            totalPenalty));
-}
-
-private static string GetResourceRiskKey(
-    Finding finding)
-{
-    if (!string.IsNullOrWhiteSpace(
-            finding.ResourceId))
+    private static string GetFindingKey(
+        Finding finding)
     {
-        return finding.ResourceId!;
+        var resourceKey =
+            !string.IsNullOrWhiteSpace(
+                finding.ResourceId)
+                ? finding.ResourceId
+                : finding.ResourceName;
+
+        return
+            $"{finding.RuleId}|{resourceKey}";
     }
 
-    return
-        $"{finding.ResourceType}|{finding.ResourceName}";
-}
-
-private static int GetSeverityPenalty(
-    Severity severity)
-{
-    return severity switch
+    private static int GetSeverityOrder(
+        Severity severity)
     {
-        Severity.Critical => 25,
-        Severity.High => 15,
-        Severity.Medium => 7,
-        Severity.Low => 3,
-        _ => 0
-    };
-}
-
-private static int CalculateOverallScore(
-    IReadOnlyDictionary<Category, int> scores)
-{
-    if (scores.Count == 0)
-    {
-        return 100;
+        return severity switch
+        {
+            Severity.Critical => 0,
+            Severity.High => 1,
+            Severity.Medium => 2,
+            Severity.Low => 3,
+            _ => 4
+        };
     }
 
-    return (int)Math.Round(
-        scores.Values.Average());
-}
+    private static ScanStats BuildStats(
+        IReadOnlyList<AzureResource> resources,
+        IReadOnlyList<MetricProfile> metrics)
+    {
+        return new ScanStats
+        {
+            Resources =
+                resources.Count,
 
-private static bool TypeEquals(
-    AzureResource resource,
-    string type)
-{
-    return string.Equals(
-        resource.Type,
-        type,
-        StringComparison.OrdinalIgnoreCase);
-}
+            ResourceTypes =
+                resources
+                    .Select(x => x.Type)
+                    .Distinct(
+                        StringComparer.OrdinalIgnoreCase)
+                    .Count(),
+
+            EnrichedResources =
+                resources.Count(
+                    resource =>
+                        resource.Enrichment?.Success ==
+                        true),
+
+            Relationships =
+                resources.Sum(
+                    resource =>
+                        resource.Relationships.Count),
+
+            MetricProfiles =
+                metrics.Count,
+
+            Vms =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Compute/virtualMachines")),
+
+            Disks =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Compute/disks")),
+
+            Nsgs =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Network/networkSecurityGroups")),
+
+            PublicIps =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Network/publicIPAddresses")),
+
+            StorageAccounts =
+                resources.Count(
+                    resource =>
+                        TypeEquals(
+                            resource,
+                            "Microsoft.Storage/storageAccounts")),
+
+            Advisor = 0,
+            MonthlyCostEur = 0
+        };
+    }
+
+    private static Dictionary<Category, int> ComputeScores(
+        IReadOnlyList<Finding> findings)
+    {
+        var result =
+            new Dictionary<Category, int>();
+
+        foreach (var category in
+                 Enum.GetValues<Category>())
+        {
+            var categoryFindings =
+                findings
+                    .Where(
+                        finding =>
+                            finding.Category ==
+                            category)
+                    .ToList();
+
+            var penalty =
+                CalculateCategoryPenalty(
+                    categoryFindings);
+
+            result[category] =
+                Math.Max(
+                    0,
+                    100 - penalty);
+        }
+
+        return result;
+    }
+
+    private static int CalculateCategoryPenalty(
+        IReadOnlyList<Finding> findings)
+    {
+        if (findings.Count == 0)
+        {
+            return 0;
+        }
+
+        var totalPenalty =
+            0.0;
+
+        var resourceGroups =
+            findings
+                .GroupBy(
+                    GetResourceRiskKey,
+                    StringComparer.OrdinalIgnoreCase);
+
+        foreach (var resourceGroup in resourceGroups)
+        {
+            var penalties =
+                resourceGroup
+                    .Select(
+                        finding =>
+                            GetSeverityPenalty(
+                                finding.Severity))
+                    .OrderByDescending(
+                        penalty => penalty)
+                    .ToList();
+
+            for (var index = 0;
+                 index < penalties.Count;
+                 index++)
+            {
+                var multiplier =
+                    index switch
+                    {
+                        0 => 1.00,
+                        1 => 0.60,
+                        2 => 0.40,
+                        _ => 0.25
+                    };
+
+                totalPenalty +=
+                    penalties[index] *
+                    multiplier;
+            }
+        }
+
+        return (int)Math.Round(
+            Math.Min(
+                100,
+                totalPenalty));
+    }
+
+    private static string GetResourceRiskKey(
+        Finding finding)
+    {
+        if (!string.IsNullOrWhiteSpace(
+                finding.ResourceId))
+        {
+            return finding.ResourceId!;
+        }
+
+        return
+            $"{finding.ResourceType}|{finding.ResourceName}";
+    }
+
+    private static int GetSeverityPenalty(
+        Severity severity)
+    {
+        return severity switch
+        {
+            Severity.Critical => 25,
+            Severity.High => 15,
+            Severity.Medium => 7,
+            Severity.Low => 3,
+            _ => 0
+        };
+    }
+
+    private static int CalculateOverallScore(
+        IReadOnlyDictionary<Category, int> scores)
+    {
+        if (scores.Count == 0)
+        {
+            return 100;
+        }
+
+        return (int)Math.Round(
+            scores.Values.Average());
+    }
+
+    private static bool TypeEquals(
+        AzureResource resource,
+        string type)
+    {
+        return string.Equals(
+            resource.Type,
+            type,
+            StringComparison.OrdinalIgnoreCase);
+    }
 }

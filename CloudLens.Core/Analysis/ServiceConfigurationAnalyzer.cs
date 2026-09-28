@@ -9,17 +9,13 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
-        if (resources == null)
-            throw new ArgumentNullException(nameof(resources));
-
-        if (subscription == null)
-            throw new ArgumentNullException(nameof(subscription));
-
         var findings = new List<Finding>();
 
         foreach (var resource in resources)
         {
-            switch (resource.Type.ToLowerInvariant())
+            var type = resource.Type.ToLowerInvariant();
+
+            switch (type)
             {
                 case "microsoft.compute/virtualmachines":
                     AnalyzeVirtualMachine(resource, findings);
@@ -30,7 +26,7 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                     break;
 
                 case "microsoft.network/virtualnetworks/subnets":
-                    AnalyzeSubnet(resource, findings);
+                    AnalyzeSubnet(resource, resources, findings);
                     break;
 
                 case "microsoft.network/networkinterfaces":
@@ -46,7 +42,7 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                     break;
 
                 case "microsoft.web/sites":
-                    AnalyzeWebSite(resource, findings);
+                    AnalyzeWebApp(resource, findings);
                     break;
 
                 case "microsoft.web/serverfarms":
@@ -57,13 +53,12 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                     AnalyzeSqlDatabase(resource, findings);
                     break;
 
-                case "microsoft.dbforpostgresql/flexibleservers":
-                case "microsoft.dbformysql/flexibleservers":
-                    AnalyzeFlexibleDatabase(resource, findings);
+                case "microsoft.sql/servers":
+                    AnalyzeSqlServer(resource, findings);
                     break;
 
                 case "microsoft.documentdb/databaseaccounts":
-                    AnalyzeCosmos(resource, findings);
+                    AnalyzeCosmosDb(resource, findings);
                     break;
 
                 case "microsoft.containerservice/managedclusters":
@@ -71,21 +66,19 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                     break;
 
                 case "microsoft.containerregistry/registries":
-                    AnalyzeContainerRegistry(resource, findings);
+                    AnalyzeAcr(resource, findings);
                     break;
 
-                case "microsoft.servicebus/namespaces":
-                case "microsoft.eventhub/namespaces":
-                    AnalyzeMessagingNamespace(resource, findings);
+                case "microsoft.messaging/namespaces":
+                    AnalyzeMessaging(resource, findings);
                     break;
 
                 case "microsoft.recoveryservices/vaults":
-                case "microsoft.dataprotection/backupvaults":
-                    AnalyzeBackupVault(resource, findings);
+                    AnalyzeRecoveryServicesVault(resource, findings);
                     break;
 
                 case "microsoft.operationalinsights/workspaces":
-                    AnalyzeLogAnalytics(resource, findings);
+                    AnalyzeLogAnalyticsWorkspace(resource, findings);
                     break;
 
                 case "microsoft.insights/components":
@@ -99,11 +92,20 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                 case "microsoft.apimanagement/service":
                     AnalyzeApiManagement(resource, findings);
                     break;
+
+                case "microsoft.dbforpostgresql/flexibleservers":
+                case "microsoft.dbformysql/flexibleservers":
+                    AnalyzeFlexibleDatabase(resource, findings);
+                    break;
             }
         }
 
         return findings;
     }
+
+    // =========================================================
+    // VIRTUAL MACHINE
+    // =========================================================
 
     private static void AnalyzeVirtualMachine(
         AzureResource resource,
@@ -114,52 +116,47 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var securityProfile = GetProperty(
-            properties.Value,
-            "securityProfile");
-
-        if (!securityProfile.HasValue)
-            return;
-
-        var secureBoot = GetBool(
-            securityProfile.Value,
-            "uefiSettings",
-            "secureBootEnabled");
-
-        if (secureBoot.HasValue && !secureBoot.Value)
+        if (TryGetBool(
+                properties.Value,
+                "securityProfile",
+                "uefiSettings",
+                "secureBootEnabled",
+                out var secureBootEnabled) &&
+            !secureBootEnabled)
         {
             Add(
                 findings,
                 resource,
                 "SEC-VM-SECURE-BOOT-DISABLED",
                 Severity.Medium,
-                "Secure Boot disabilitato sulla VM",
-                "La VM non risulta configurata con Secure Boot abilitato.",
-                "Riduce le protezioni contro componenti di boot non attendibili.",
-                "Abilitare Secure Boot quando compatibile con il sistema operativo e il workload.",
+                "Secure Boot disabilitato",
+                "La macchina virtuale non utilizza Secure Boot.",
+                "La disabilitazione di Secure Boot riduce le protezioni disponibili contro componenti di boot non attendibili.",
+                "Valutare l'abilitazione di Secure Boot se compatibile con il sistema operativo e il workload.",
                 Category.Security);
         }
     }
+
+    // =========================================================
+    // VM SCALE SET
+    // =========================================================
 
     private static void AnalyzeVmScaleSet(
         AzureResource resource,
         List<Finding> findings)
     {
-        var properties = resource.GetEffectiveProperties();
+        var sku = resource.Sku;
 
-        if (!properties.HasValue)
+        if (!sku.HasValue)
             return;
 
-        var sku = GetString(
-            properties.Value,
-            "sku",
-            "name");
-
-        if (string.IsNullOrWhiteSpace(sku))
-            return;
-
-        if (sku.Contains(
-                "_Basic",
+        if (TryGetString(
+                sku.Value,
+                "name",
+                out var skuName) &&
+            string.Equals(
+                skuName,
+                "Basic",
                 StringComparison.OrdinalIgnoreCase))
         {
             Add(
@@ -168,15 +165,20 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                 "COST-VMSS-BASIC-SKU",
                 Severity.Low,
                 "VM Scale Set con SKU Basic",
-                $"Il VM Scale Set utilizza lo SKU '{sku}'.",
-                "Lo SKU potrebbe non essere adeguato per workload che richiedono funzionalità avanzate.",
-                "Verificare requisiti e costo dello SKU rispetto al workload.",
+                "Il Virtual Machine Scale Set utilizza uno SKU Basic.",
+                "Lo SKU Basic offre funzionalità e capacità inferiori rispetto agli SKU più recenti e può limitare le opzioni architetturali disponibili.",
+                "Valutare la migrazione a uno SKU più appropriato per il workload.",
                 Category.Cost);
         }
     }
 
+    // =========================================================
+    // SUBNET
+    // =========================================================
+
     private static void AnalyzeSubnet(
         AzureResource resource,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
@@ -188,20 +190,55 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
             properties.Value,
             "networkSecurityGroup");
 
-        if (!nsg.HasValue)
-        {
-            Add(
-                findings,
-                resource,
-                "SEC-SUBNET-NO-NSG",
-                Severity.Low,
-                "Subnet senza NSG associato",
-                "La subnet non risulta associata a un Network Security Group.",
-                "La segmentazione di rete può risultare meno restrittiva del necessario.",
-                "Valutare l'associazione di un NSG coerente con i requisiti applicativi.",
-                Category.Security);
-        }
+        if (nsg.HasValue)
+            return;
+
+        /*
+         * Una subnet senza NSG non è necessariamente un problema.
+         *
+         * Il finding viene generato solamente quando la subnet
+         * risulta effettivamente utilizzata da almeno una NIC.
+         *
+         * AzureRelationshipBuilder costruisce:
+         *
+         * NIC -> Subnet
+         */
+
+        var subnetId = resource.Id;
+
+        var hasNetworkInterface = resources.Any(otherResource =>
+            string.Equals(
+                otherResource.Type,
+                "Microsoft.Network/networkInterfaces",
+                StringComparison.OrdinalIgnoreCase) &&
+            otherResource.Relationships.Any(relationship =>
+                string.Equals(
+                    relationship.RelationshipType,
+                    "Subnet",
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    relationship.TargetResourceId,
+                    subnetId,
+                    StringComparison.OrdinalIgnoreCase)));
+
+        if (!hasNetworkInterface)
+            return;
+
+        Add(
+            findings,
+            resource,
+            "SEC-SUBNET-NO-NSG",
+            Severity.Low,
+            "Subnet utilizzata senza NSG associato",
+            "La subnet è utilizzata da almeno una Network Interface ma non risulta associata a un Network Security Group.",
+            "La subnet non dispone di un controllo NSG dedicato, aumentando il rischio di una segmentazione di rete meno restrittiva del necessario.",
+            "Valutare l'associazione di un NSG coerente con i requisiti di sicurezza e con il modello di segmentazione della rete.",
+            Category.Security);
     }
+
+    // =========================================================
+    // NETWORK INTERFACE
+    // =========================================================
 
     private static void AnalyzeNetworkInterface(
         AzureResource resource,
@@ -212,38 +249,63 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var ipConfigurations = GetProperty(
-            properties.Value,
-            "ipConfigurations");
-
-        if (!ipConfigurations.HasValue ||
-            ipConfigurations.Value.ValueKind != JsonValueKind.Array)
+        if (!TryGetArray(
+                properties.Value,
+                "ipConfigurations",
+                out var ipConfigurations))
         {
             return;
         }
 
         foreach (var configuration in
-                 ipConfigurations.Value.EnumerateArray())
+                 ipConfigurations.EnumerateArray())
         {
-            var publicIp = GetProperty(
-                configuration,
-                "publicIPAddress");
-
-            if (publicIp.HasValue)
+            if (!TryGetProperty(
+                    configuration,
+                    "properties",
+                    out var ipProperties))
             {
-                Add(
-                    findings,
-                    resource,
-                    "SEC-NIC-PUBLIC-IP",
-                    Severity.Medium,
-                    "NIC associata a Public IP",
-                    "La Network Interface dispone di una configurazione IP pubblica.",
-                    "La VM associata può essere direttamente esposta a Internet.",
-                    "Verificare se l'accesso pubblico è realmente necessario e preferire accessi tramite servizi controllati.",
-                    Category.Security);
+                continue;
             }
+
+            if (!TryGetProperty(
+                    ipProperties,
+                    "publicIPAddress",
+                    out var publicIp))
+            {
+                continue;
+            }
+
+            if (publicIp.ValueKind != JsonValueKind.Object)
+                continue;
+
+            if (!TryGetString(
+                    publicIp,
+                    "id",
+                    out var publicIpId) ||
+                string.IsNullOrWhiteSpace(publicIpId))
+            {
+                continue;
+            }
+
+            Add(
+                findings,
+                resource,
+                "SEC-NIC-PUBLIC-IP",
+                Severity.Medium,
+                "Network Interface associata a un Public IP",
+                "La Network Interface dispone di almeno una configurazione IP associata a un Public IP.",
+                "L'associazione di un Public IP rende la risorsa potenzialmente raggiungibile direttamente da Internet, a seconda delle regole NSG e degli altri controlli di rete.",
+                "Verificare se l'esposizione pubblica è necessaria e applicare NSG e altri controlli di rete appropriati.",
+                Category.Security);
+
+            break;
         }
     }
+
+    // =========================================================
+    // APPLICATION GATEWAY
+    // =========================================================
 
     private static void AnalyzeApplicationGateway(
         AzureResource resource,
@@ -254,47 +316,57 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var httpListeners = GetProperty(
-            properties.Value,
-            "httpListeners");
-
-        if (httpListeners.HasValue &&
-            httpListeners.Value.ValueKind == JsonValueKind.Array &&
-            httpListeners.Value.GetArrayLength() > 0)
+        if (!TryGetArray(
+                properties.Value,
+                "httpListeners",
+                out var listeners))
         {
+            return;
+        }
+
+        foreach (var listener in listeners.EnumerateArray())
+        {
+            if (!TryGetProperty(
+                    listener,
+                    "properties",
+                    out var listenerProperties))
+            {
+                continue;
+            }
+
+            var protocol =
+                GetString(
+                    listenerProperties,
+                    "protocol");
+
+            if (!string.Equals(
+                    protocol,
+                    "Http",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             Add(
                 findings,
                 resource,
                 "SEC-APPGW-HTTP-LISTENER",
                 Severity.Medium,
-                "Application Gateway con HTTP listener",
-                "È presente almeno un HTTP listener.",
-                "Il traffico HTTP può non essere cifrato durante il transito.",
-                "Preferire HTTPS e reindirizzare HTTP verso HTTPS quando compatibile.",
+                "Application Gateway con listener HTTP",
+                "L'Application Gateway espone almeno un listener HTTP non cifrato.",
+                "Il traffico gestito dal listener HTTP non utilizza TLS sul tratto client-to-gateway.",
+                "Valutare la conversione del listener a HTTPS e l'utilizzo di un certificato TLS valido.",
                 Category.Security);
+
+            break;
         }
     }
+
+    // =========================================================
+    // PRIVATE ENDPOINT
+    // =========================================================
 
     private static void AnalyzePrivateEndpoint(
-        AzureResource resource,
-        List<Finding> findings)
-    {
-        if (resource.Relationships.Count == 0)
-        {
-            Add(
-                findings,
-                resource,
-                "OPS-PRIVATE-ENDPOINT-UNRESOLVED",
-                Severity.Low,
-                "Private Endpoint senza relazione rilevata",
-                "Il Private Endpoint non presenta relazioni nel modello di topology.",
-                "La configurazione potrebbe essere incompleta oppure non completamente rilevata.",
-                "Verificare la connessione del Private Endpoint alla risorsa target.",
-                Category.Operations);
-        }
-    }
-
-    private static void AnalyzeWebSite(
         AzureResource resource,
         List<Finding> findings)
     {
@@ -303,11 +375,96 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var ftpState = GetString(
-            properties.Value,
-            "ftpsState");
+        if (!TryGetArray(
+                properties.Value,
+                "privateLinkServiceConnections",
+                out var connections))
+        {
+            return;
+        }
 
-        if (string.Equals(
+        foreach (var connection in connections.EnumerateArray())
+        {
+            if (!TryGetProperty(
+                    connection,
+                    "properties",
+                    out var connectionProperties))
+            {
+                continue;
+            }
+
+            if (!TryGetProperty(
+                    connectionProperties,
+                    "privateLinkServiceConnectionState",
+                    out var connectionState))
+            {
+                continue;
+            }
+
+            var status =
+                GetString(
+                    connectionState,
+                    "status");
+
+            if (string.Equals(
+                    status,
+                    "Approved",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            Add(
+                findings,
+                resource,
+                "OPS-PRIVATE-ENDPOINT-UNRESOLVED",
+                Severity.Medium,
+                "Private Endpoint con connessione non approvata",
+                "Il Private Endpoint presenta almeno una private link service connection non approvata.",
+                "La connessione al servizio target potrebbe non essere operativa.",
+                "Verificare lo stato della connessione e completare l'approvazione se prevista dall'architettura.",
+                Category.Operations);
+
+            break;
+        }
+    }
+
+    // =========================================================
+    // WEB APP
+    // =========================================================
+
+    private static void AnalyzeWebApp(
+        AzureResource resource,
+        List<Finding> findings)
+    {
+        var properties = resource.GetEffectiveProperties();
+
+        if (!properties.HasValue)
+            return;
+
+        if (TryGetBool(
+                properties.Value,
+                "httpsOnly",
+                out var httpsOnly) &&
+            !httpsOnly)
+        {
+            Add(
+                findings,
+                resource,
+                "SEC-APP-NO-HTTPS",
+                Severity.Medium,
+                "Web App senza HTTPS obbligatorio",
+                "La Web App non forza il traffico HTTPS.",
+                "Le richieste HTTP possono transitare senza cifratura end-to-end verso il servizio.",
+                "Abilitare HTTPS Only per forzare il traffico HTTPS.",
+                Category.Security);
+        }
+
+        if (TryGetString(
+                properties.Value,
+                "ftpState",
+                out var ftpState) &&
+            string.Equals(
                 ftpState,
                 "AllAllowed",
                 StringComparison.OrdinalIgnoreCase))
@@ -317,45 +474,60 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                 resource,
                 "SEC-APP-FTP-ALL",
                 Severity.Medium,
-                "App Service con FTP non sicuro",
-                "L'App Service consente sia FTP sia FTPS.",
-                "FTP non cifra il traffico.",
-                "Impostare FTPS Only o disabilitare il protocollo quando non necessario.",
+                "Web App con accesso FTP non cifrato consentito",
+                "La Web App consente l'accesso FTP secondo la configurazione corrente.",
+                "FTP può trasmettere credenziali e dati senza protezioni TLS.",
+                "Disabilitare FTP non necessario oppure utilizzare FTPS secondo i requisiti del workload.",
                 Category.Security);
         }
     }
+
+    // =========================================================
+    // APP SERVICE PLAN
+    // =========================================================
 
     private static void AnalyzeAppServicePlan(
         AzureResource resource,
         List<Finding> findings)
     {
-        var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!resource.Sku.HasValue)
             return;
 
-        var sku = GetString(
-            properties.Value,
-            "sku",
-            "name");
+        if (!TryGetString(
+                resource.Sku.Value,
+                "name",
+                out var skuName))
+        {
+            return;
+        }
 
-        if (string.Equals(
-                sku,
+        if (!string.Equals(
+                skuName,
                 "F1",
+                StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(
+                skuName,
+                "D1",
                 StringComparison.OrdinalIgnoreCase))
         {
-            Add(
-                findings,
-                resource,
-                "COST-APPPLAN-FREE",
-                Severity.Low,
-                "App Service Plan con SKU Free",
-                "Il piano utilizza lo SKU Free.",
-                "Potrebbe essere appropriato per workload di test ma non per carichi produttivi.",
-                "Verificare che il piano sia coerente con l'utilizzo effettivo.",
-                Category.Cost);
+            return;
         }
+
+        Add(
+            findings,
+            resource,
+            "COST-APPPLAN-FREE",
+            Severity.Low,
+            "App Service Plan con tier Free/Shared",
+            "L'App Service Plan utilizza un tier Free/Shared.",
+            "Il tier può essere inadeguato per workload produttivi e presenta limitazioni di capacità e funzionalità.",
+            "Verificare i requisiti del workload e valutare un tier appropriato.",
+            Category.Cost);
     }
+
+    // =========================================================
+    // SQL DATABASE
+    // =========================================================
 
     private static void AnalyzeSqlDatabase(
         AzureResource resource,
@@ -366,29 +538,30 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var status = GetString(
-            properties.Value,
-            "status");
-
-        if (string.Equals(
-                status,
-                "Paused",
-                StringComparison.OrdinalIgnoreCase))
+        if (TryGetBool(
+                properties.Value,
+                "paused",
+                out var paused) &&
+            paused)
         {
             Add(
                 findings,
                 resource,
                 "COST-SQLDB-PAUSED",
                 Severity.Low,
-                "Azure SQL Database in stato Paused",
-                "Il database risulta in stato Paused.",
-                "Verificare se la configurazione e il livello di servizio sono coerenti con l'utilizzo previsto.",
-                "Verificare il lifecycle del database e lo SKU configurato.",
+                "SQL Database attualmente in stato paused",
+                "Il database SQL risulta in stato paused.",
+                "Il database potrebbe avere un utilizzo intermittente e la configurazione può richiedere una revisione in funzione del workload.",
+                "Verificare il comportamento atteso del database e il modello di utilizzo.",
                 Category.Cost);
         }
     }
 
-    private static void AnalyzeFlexibleDatabase(
+    // =========================================================
+    // SQL SERVER
+    // =========================================================
+
+    private static void AnalyzeSqlServer(
         AzureResource resource,
         List<Finding> findings)
     {
@@ -397,29 +570,45 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var publicAccess = GetString(
-            properties.Value,
-            "publicNetworkAccess");
+        if (!TryGetString(
+                properties.Value,
+                "publicNetworkAccess",
+                out var publicNetworkAccess))
+        {
+            return;
+        }
 
-        if (string.Equals(
-                publicAccess,
+        if (!string.Equals(
+                publicNetworkAccess,
                 "Enabled",
                 StringComparison.OrdinalIgnoreCase))
         {
-            Add(
-                findings,
-                resource,
-                "SEC-DB-PUBLIC-NETWORK",
-                Severity.Medium,
-                "Database con public network access",
-                "Il database consente accesso tramite rete pubblica.",
-                "La superficie di esposizione del database aumenta.",
-                "Valutare Private Endpoint o regole di rete più restrittive.",
-                Category.Security);
+            return;
         }
+
+        if (HasPrivateEndpointConnection(resource) ||
+            HasNetworkRestriction(properties.Value))
+        {
+            return;
+        }
+
+        Add(
+            findings,
+            resource,
+            "SEC-DB-PUBLIC-NETWORK",
+            Severity.Medium,
+            "SQL Server accessibile tramite rete pubblica",
+            "Il SQL Server risulta abilitato all'accesso tramite rete pubblica senza evidenza di restrizioni di rete sufficienti nei dati raccolti.",
+            "Un endpoint pubblico aumenta la superficie di esposizione del database.",
+            "Valutare l'utilizzo di Private Endpoint oppure configurare restrizioni di rete coerenti con i requisiti del workload.",
+            Category.Security);
     }
 
-    private static void AnalyzeCosmos(
+    // =========================================================
+    // COSMOS DB
+    // =========================================================
+
+    private static void AnalyzeCosmosDb(
         AzureResource resource,
         List<Finding> findings)
     {
@@ -428,27 +617,43 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var publicNetwork = GetString(
-            properties.Value,
-            "publicNetworkAccess");
+        if (!TryGetString(
+                properties.Value,
+                "publicNetworkAccess",
+                out var publicNetworkAccess))
+        {
+            return;
+        }
 
-        if (string.Equals(
-                publicNetwork,
+        if (!string.Equals(
+                publicNetworkAccess,
                 "Enabled",
                 StringComparison.OrdinalIgnoreCase))
         {
-            Add(
-                findings,
-                resource,
-                "SEC-COSMOS-PUBLIC-NETWORK",
-                Severity.Medium,
-                "Cosmos DB accessibile tramite rete pubblica",
-                "L'account Cosmos DB consente accesso tramite rete pubblica.",
-                "La superficie di rete del database è maggiore del necessario.",
-                "Valutare Private Endpoint e limitazioni di rete.",
-                Category.Security);
+            return;
         }
+
+        if (HasPrivateEndpointConnection(resource) ||
+            HasNetworkRestriction(properties.Value))
+        {
+            return;
+        }
+
+        Add(
+            findings,
+            resource,
+            "SEC-COSMOS-PUBLIC-NETWORK",
+            Severity.Medium,
+            "Cosmos DB accessibile tramite rete pubblica",
+            "Cosmos DB risulta accessibile tramite rete pubblica senza evidenza di restrizioni di rete sufficienti nei dati raccolti.",
+            "Un endpoint pubblico aumenta la superficie di esposizione del servizio.",
+            "Valutare Private Endpoint oppure configurare restrizioni di rete appropriate.",
+            Category.Security);
     }
+
+    // =========================================================
+    // AKS
+    // =========================================================
 
     private static void AnalyzeAks(
         AzureResource resource,
@@ -459,46 +664,62 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var privateCluster = GetBool(
-            properties.Value,
-            "apiServerAccessProfile",
-            "enablePrivateCluster");
-
-        if (privateCluster.HasValue && !privateCluster.Value)
+        if (TryGetBool(
+                properties.Value,
+                "apiServerAccessProfile",
+                "enablePrivateCluster",
+                out var privateCluster) &&
+            privateCluster)
         {
-            Add(
-                findings,
-                resource,
-                "SEC-AKS-PUBLIC-API",
-                Severity.Medium,
-                "AKS con API Server pubblico",
-                "Il cluster AKS non risulta configurato come private cluster.",
-                "L'API Server può essere raggiungibile tramite endpoint pubblico.",
-                "Valutare Private Cluster o restrizioni tramite authorized IP ranges.",
-                Category.Security);
+            return;
         }
 
-        var disableLocalAccounts = GetBool(
-            properties.Value,
-            "disableLocalAccounts");
+        var hasAuthorizedIpRanges =
+            TryGetArray(
+                properties.Value,
+                "apiServerAccessProfile",
+                "authorizedIpRanges",
+                out var authorizedIpRanges) &&
+            authorizedIpRanges.GetArrayLength() > 0;
 
-        if (disableLocalAccounts.HasValue &&
-            !disableLocalAccounts.Value)
+        if (hasAuthorizedIpRanges)
+            return;
+
+        Add(
+            findings,
+            resource,
+            "SEC-AKS-PUBLIC-API",
+            Severity.Medium,
+            "AKS con API Server pubblicamente accessibile",
+            "Il cluster AKS non risulta private e non presenta authorized IP ranges valorizzati nei dati raccolti.",
+            "L'API Server può risultare raggiungibile da reti non previste, aumentando la superficie di attacco amministrativa.",
+            "Valutare un private cluster oppure limitare l'accesso tramite authorized IP ranges.",
+            Category.Security);
+
+        if (TryGetBool(
+                properties.Value,
+                "disableLocalAccounts",
+                out var disableLocalAccounts) &&
+            !disableLocalAccounts)
         {
             Add(
                 findings,
                 resource,
                 "SEC-AKS-LOCAL-ACCOUNTS",
                 Severity.Medium,
-                "AKS con local accounts abilitati",
-                "Gli account locali del cluster non risultano disabilitati.",
-                "Gli account locali possono introdurre un ulteriore meccanismo di autenticazione da gestire.",
-                "Valutare Microsoft Entra ID e RBAC come meccanismo principale di accesso.",
+                "AKS con account locali abilitati",
+                "Il cluster AKS consente l'utilizzo degli account locali.",
+                "Gli account locali possono aumentare la superficie di autenticazione oltre ai meccanismi di identità centralizzata.",
+                "Valutare la disabilitazione degli account locali quando compatibile con il modello operativo.",
                 Category.Security);
         }
     }
 
-    private static void AnalyzeContainerRegistry(
+    // =========================================================
+    // ACR
+    // =========================================================
+
+    private static void AnalyzeAcr(
         AzureResource resource,
         List<Finding> findings)
     {
@@ -507,46 +728,59 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        if (GetBool(
+        if (TryGetBool(
                 properties.Value,
                 "adminUserEnabled",
-                false))
+                out var adminUserEnabled) &&
+            adminUserEnabled)
         {
             Add(
                 findings,
                 resource,
                 "SEC-ACR-ADMIN-USER",
                 Severity.Medium,
-                "ACR admin user abilitato",
+                "Azure Container Registry con admin user abilitato",
                 "L'admin user del Container Registry risulta abilitato.",
-                "Le credenziali statiche aumentano la superficie di gestione delle identità.",
-                "Preferire Microsoft Entra ID, managed identity o service principals con privilegi minimi.",
+                "L'utilizzo di credenziali amministrative statiche aumenta la superficie di gestione delle credenziali.",
+                "Preferire Microsoft Entra ID e managed identity quando supportati dal workload.",
                 Category.Security);
         }
 
-        var publicNetwork = GetString(
-            properties.Value,
-            "publicNetworkAccess");
-
-        if (string.Equals(
-                publicNetwork,
+        if (!TryGetString(
+                properties.Value,
+                "publicNetworkAccess",
+                out var publicNetworkAccess) ||
+            !string.Equals(
+                publicNetworkAccess,
                 "Enabled",
                 StringComparison.OrdinalIgnoreCase))
         {
-            Add(
-                findings,
-                resource,
-                "SEC-ACR-PUBLIC-NETWORK",
-                Severity.Low,
-                "ACR accessibile tramite rete pubblica",
-                "Il Container Registry consente accesso tramite rete pubblica.",
-                "Il registry è raggiungibile da una superficie di rete più ampia.",
-                "Valutare Private Endpoint e limitazioni di rete.",
-                Category.Security);
+            return;
         }
+
+        if (HasPrivateEndpointConnection(resource) ||
+            HasNetworkRestriction(properties.Value))
+        {
+            return;
+        }
+
+        Add(
+            findings,
+            resource,
+            "SEC-ACR-PUBLIC-NETWORK",
+            Severity.Medium,
+            "Azure Container Registry accessibile tramite rete pubblica",
+            "Il Container Registry risulta accessibile tramite rete pubblica senza evidenza di restrizioni di rete sufficienti nei dati raccolti.",
+            "L'accesso pubblico aumenta la superficie di esposizione del registry e delle immagini container.",
+            "Valutare Private Endpoint oppure configurare restrizioni di rete appropriate.",
+            Category.Security);
     }
 
-    private static void AnalyzeMessagingNamespace(
+    // =========================================================
+    // MESSAGING
+    // =========================================================
+
+    private static void AnalyzeMessaging(
         AzureResource resource,
         List<Finding> findings)
     {
@@ -555,29 +789,41 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var publicNetwork = GetString(
-            properties.Value,
-            "publicNetworkAccess");
-
-        if (string.Equals(
-                publicNetwork,
+        if (!TryGetString(
+                properties.Value,
+                "publicNetworkAccess",
+                out var publicNetworkAccess) ||
+            !string.Equals(
+                publicNetworkAccess,
                 "Enabled",
                 StringComparison.OrdinalIgnoreCase))
         {
-            Add(
-                findings,
-                resource,
-                "SEC-MESSAGING-PUBLIC-NETWORK",
-                Severity.Low,
-                "Messaging namespace accessibile tramite rete pubblica",
-                "Il namespace consente accesso tramite rete pubblica.",
-                "La superficie di esposizione del servizio aumenta.",
-                "Valutare Private Endpoint e network rules.",
-                Category.Security);
+            return;
         }
+
+        if (HasPrivateEndpointConnection(resource) ||
+            HasNetworkRestriction(properties.Value))
+        {
+            return;
+        }
+
+        Add(
+            findings,
+            resource,
+            "SEC-MESSAGING-PUBLIC-NETWORK",
+            Severity.Medium,
+            "Messaging namespace accessibile tramite rete pubblica",
+            "Il namespace Messaging risulta accessibile tramite rete pubblica senza evidenza di restrizioni di rete sufficienti nei dati raccolti.",
+            "L'accesso pubblico aumenta la superficie di esposizione del servizio di messaging.",
+            "Valutare Private Endpoint oppure configurare restrizioni di rete appropriate.",
+            Category.Security);
     }
 
-    private static void AnalyzeBackupVault(
+    // =========================================================
+    // RECOVERY SERVICES
+    // =========================================================
+
+    private static void AnalyzeRecoveryServicesVault(
         AzureResource resource,
         List<Finding> findings)
     {
@@ -586,26 +832,30 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var softDelete = GetBool(
-            properties.Value,
-            "softDeleteFeatureState");
-
-        if (softDelete.HasValue && !softDelete.Value)
+        if (TryGetBool(
+                properties.Value,
+                "softDeleteFeatureState",
+                out var softDeleteEnabled) &&
+            !softDeleteEnabled)
         {
             Add(
                 findings,
                 resource,
                 "SEC-BACKUP-SOFTDELETE",
-                Severity.Medium,
-                "Backup Vault con soft delete non attivo",
-                "Il vault non risulta configurato con soft delete attivo.",
-                "La protezione contro cancellazioni accidentali o malevole è ridotta.",
-                "Abilitare le funzionalità di protezione dalla cancellazione supportate dal vault.",
+                Severity.High,
+                "Soft Delete del Recovery Services Vault non abilitato",
+                "Il Recovery Services Vault non risulta configurato con Soft Delete abilitato.",
+                "La cancellazione accidentale o malevola dei dati di backup può risultare più difficile da recuperare.",
+                "Abilitare Soft Delete secondo i requisiti di protezione del workload.",
                 Category.Security);
         }
     }
 
-    private static void AnalyzeLogAnalytics(
+    // =========================================================
+    // LOG ANALYTICS
+    // =========================================================
+
+    private static void AnalyzeLogAnalyticsWorkspace(
         AzureResource resource,
         List<Finding> findings)
     {
@@ -614,24 +864,32 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var retention = GetInt(
-            properties.Value,
-            "retentionInDays");
-
-        if (retention.HasValue && retention.Value < 30)
+        if (!TryGetInt(
+                properties.Value,
+                "retentionInDays",
+                out var retentionDays))
         {
-            Add(
-                findings,
-                resource,
-                "OPS-LOG-RETENTION-LOW",
-                Severity.Low,
-                "Log Analytics con retention ridotta",
-                $"Il workspace utilizza una retention di circa {retention.Value} giorni.",
-                "La disponibilità dello storico diagnostico può essere insufficiente per troubleshooting e audit.",
-                "Verificare i requisiti di retention e aumentare il periodo quando necessario.",
-                Category.Operations);
+            return;
         }
+
+        if (retentionDays >= 30)
+            return;
+
+        Add(
+            findings,
+            resource,
+            "OPS-LOG-RETENTION-LOW",
+            Severity.Low,
+            "Log Analytics con retention inferiore a 30 giorni",
+            $"Il workspace Log Analytics presenta una retention di {retentionDays} giorni.",
+            "Una retention ridotta limita la disponibilità dei dati storici per troubleshooting, auditing e analisi.",
+            "Valutare una retention coerente con i requisiti operativi, di sicurezza e compliance.",
+            Category.Operations);
     }
+
+    // =========================================================
+    // APPLICATION INSIGHTS
+    // =========================================================
 
     private static void AnalyzeApplicationInsights(
         AzureResource resource,
@@ -642,24 +900,32 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var kind = GetString(
-            properties.Value,
-            "kind");
+        if (!TryGetString(
+                properties.Value,
+                "Application_Type",
+                out var applicationType))
+        {
+            return;
+        }
 
-        if (string.IsNullOrWhiteSpace(kind))
+        if (string.IsNullOrWhiteSpace(applicationType))
         {
             Add(
                 findings,
                 resource,
                 "OPS-APPINSIGHTS-CONFIG",
                 Severity.Low,
-                "Application Insights con configurazione non determinata",
-                "La configurazione applicativa non è completamente determinabile dai dati ARM disponibili.",
-                "Potrebbero mancare informazioni necessarie per valutare la copertura del monitoring.",
-                "Verificare diagnostica, availability tests e integrazione con l'applicazione.",
+                "Application Insights con configurazione incompleta",
+                "Application Insights non presenta un Application Type valorizzato nei dati raccolti.",
+                "Una configurazione incompleta può ridurre la qualità della telemetria e delle informazioni disponibili.",
+                "Verificare la configurazione di Application Insights.",
                 Category.Operations);
         }
     }
+
+    // =========================================================
+    // COGNITIVE SERVICES
+    // =========================================================
 
     private static void AnalyzeCognitiveServices(
         AzureResource resource,
@@ -670,27 +936,39 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var publicNetwork = GetString(
-            properties.Value,
-            "publicNetworkAccess");
-
-        if (string.Equals(
-                publicNetwork,
+        if (!TryGetString(
+                properties.Value,
+                "publicNetworkAccess",
+                out var publicNetworkAccess) ||
+            !string.Equals(
+                publicNetworkAccess,
                 "Enabled",
                 StringComparison.OrdinalIgnoreCase))
         {
-            Add(
-                findings,
-                resource,
-                "SEC-AI-PUBLIC-NETWORK",
-                Severity.Low,
-                "Azure AI service accessibile tramite rete pubblica",
-                "Il servizio Azure AI consente accesso tramite rete pubblica.",
-                "L'endpoint è esposto a una superficie di rete più ampia.",
-                "Valutare Private Endpoint e restrizioni di rete.",
-                Category.Security);
+            return;
         }
+
+        if (HasPrivateEndpointConnection(resource) ||
+            HasNetworkRestriction(properties.Value))
+        {
+            return;
+        }
+
+        Add(
+            findings,
+            resource,
+            "SEC-AI-PUBLIC-NETWORK",
+            Severity.Medium,
+            "Cognitive Services accessibile tramite rete pubblica",
+            "Il servizio Cognitive Services risulta accessibile tramite rete pubblica senza evidenza di restrizioni di rete sufficienti nei dati raccolti.",
+            "L'accesso pubblico aumenta la superficie di esposizione delle API cognitive.",
+            "Valutare Private Endpoint oppure configurare restrizioni di rete appropriate.",
+            Category.Security);
     }
+
+    // =========================================================
+    // API MANAGEMENT
+    // =========================================================
 
     private static void AnalyzeApiManagement(
         AzureResource resource,
@@ -701,171 +979,371 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         if (!properties.HasValue)
             return;
 
-        var publicNetwork = GetString(
-            properties.Value,
-            "publicNetworkAccess");
-
-        if (string.Equals(
-                publicNetwork,
+        if (!TryGetString(
+                properties.Value,
+                "publicNetworkAccess",
+                out var publicNetworkAccess) ||
+            !string.Equals(
+                publicNetworkAccess,
                 "Enabled",
                 StringComparison.OrdinalIgnoreCase))
         {
-            Add(
-                findings,
-                resource,
-                "SEC-APIM-PUBLIC-NETWORK",
-                Severity.Low,
-                "API Management accessibile pubblicamente",
-                "API Management dispone di accesso pubblico.",
-                "Le API possono essere esposte direttamente a Internet.",
-                "Verificare che l'esposizione sia intenzionale e applicare le necessarie policy di sicurezza.",
-                Category.Security);
+            return;
         }
+
+        if (HasPrivateEndpointConnection(resource) ||
+            HasNetworkRestriction(properties.Value))
+        {
+            return;
+        }
+
+        Add(
+            findings,
+            resource,
+            "SEC-APIM-PUBLIC-NETWORK",
+            Severity.Medium,
+            "API Management accessibile tramite rete pubblica",
+            "API Management risulta accessibile tramite rete pubblica senza evidenza di restrizioni di rete sufficienti nei dati raccolti.",
+            "L'accesso pubblico aumenta la superficie di esposizione degli endpoint API.",
+            "Valutare Private Endpoint oppure configurare restrizioni di rete appropriate.",
+            Category.Security);
     }
+
+    // =========================================================
+    // FLEXIBLE DATABASE
+    // =========================================================
+
+    private static void AnalyzeFlexibleDatabase(
+        AzureResource resource,
+        List<Finding> findings)
+    {
+        var properties = resource.GetEffectiveProperties();
+
+        if (!properties.HasValue)
+            return;
+
+        if (!TryGetString(
+                properties.Value,
+                "publicNetworkAccess",
+                out var publicNetworkAccess) ||
+            !string.Equals(
+                publicNetworkAccess,
+                "Enabled",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (HasPrivateEndpointConnection(resource) ||
+            HasNetworkRestriction(properties.Value))
+        {
+            return;
+        }
+
+        Add(
+            findings,
+            resource,
+            "SEC-DB-PUBLIC-NETWORK",
+            Severity.Medium,
+            "Flexible Database accessibile tramite rete pubblica",
+            "Il database Flexible Server risulta accessibile tramite rete pubblica senza evidenza di restrizioni di rete sufficienti nei dati raccolti.",
+            "L'accesso pubblico aumenta la superficie di esposizione del database.",
+            "Valutare Private Endpoint o configurare correttamente le regole di rete.",
+            Category.Security);
+    }
+
+    // =========================================================
+    // NETWORK HELPERS
+    // =========================================================
+
+    private static bool HasPrivateEndpointConnection(
+        AzureResource resource)
+    {
+        return resource.Relationships.Any(
+            relationship =>
+                string.Equals(
+                    relationship.RelationshipType,
+                    "PrivateLinkTarget",
+                    StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasNetworkRestriction(
+        JsonElement properties)
+    {
+        if (HasDefaultActionDeny(properties))
+            return true;
+
+        if (TryGetArray(
+                properties,
+                "networkAcls",
+                out var networkAcls))
+        {
+            foreach (var acl in networkAcls.EnumerateArray())
+            {
+                if (acl.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                if (TryGetString(
+                        acl,
+                        "defaultAction",
+                        out var defaultAction) &&
+                    string.Equals(
+                        defaultAction,
+                        "Deny",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasDefaultActionDeny(
+        JsonElement properties)
+    {
+        return TryGetString(
+                properties,
+                "networkRuleSet",
+                "defaultAction",
+                out var defaultAction) &&
+            string.Equals(
+                defaultAction,
+                "Deny",
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    // =========================================================
+    // JSON HELPERS
+    // =========================================================
 
     private static JsonElement? GetProperty(
         JsonElement element,
-        string name)
+        string propertyName)
     {
-        if (!element.TryGetProperty(
-                name,
-                out var value))
-        {
-            return null;
-        }
-
-        return value;
+        return element.TryGetProperty(
+                propertyName,
+                out var value)
+            ? value
+            : null;
     }
 
-    private static JsonElement? GetProperty(
+    private static bool TryGetProperty(
         JsonElement element,
-        string parent,
-        string child)
+        string propertyName,
+        out JsonElement value)
     {
-        if (!element.TryGetProperty(
-                parent,
-                out var parentValue))
-        {
-            return null;
-        }
-
-        if (!parentValue.TryGetProperty(
-                child,
-                out var value))
-        {
-            return null;
-        }
-
-        return value;
+        return element.TryGetProperty(
+            propertyName,
+            out value);
     }
 
     private static string? GetString(
         JsonElement element,
-        string name)
+        string propertyName)
     {
-        if (!element.TryGetProperty(
-                name,
-                out var value) ||
-            value.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        return value.GetString();
-    }
-
-    private static string? GetString(
-        JsonElement element,
-        string parent,
-        string child)
-    {
-        var value = GetProperty(
-            element,
-            parent,
-            child);
-
-        return value.HasValue &&
-               value.Value.ValueKind == JsonValueKind.String
-            ? value.Value.GetString()
+        return TryGetString(
+                element,
+                propertyName,
+                out var value)
+            ? value
             : null;
     }
 
-    private static bool GetBool(
+    private static bool TryGetString(
         JsonElement element,
-        string name,
-        bool defaultValue)
+        string propertyName,
+        out string? value)
     {
+        value = null;
+
         if (!element.TryGetProperty(
-                name,
-                out var value))
+                propertyName,
+                out var property))
         {
-            return defaultValue;
+            return false;
         }
 
-        return value.ValueKind switch
+        if (property.ValueKind !=
+            JsonValueKind.String)
         {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => defaultValue
-        };
-    }
-
-    private static bool? GetBool(
-        JsonElement element,
-        string name)
-    {
-        if (!element.TryGetProperty(
-                name,
-                out var value))
-        {
-            return null;
+            return false;
         }
 
-        return value.ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => null
-        };
+        value = property.GetString();
+        return !string.IsNullOrWhiteSpace(value);
     }
 
-    private static bool? GetBool(
+    private static bool TryGetString(
         JsonElement element,
-        string parent,
-        string child)
+        string parentProperty,
+        string childProperty,
+        out string? value)
     {
-        var value = GetProperty(
-            element,
+        value = null;
+
+        if (!element.TryGetProperty(
+                parentProperty,
+                out var parent))
+        {
+            return false;
+        }
+
+        return TryGetString(
             parent,
-            child);
-
-        if (!value.HasValue)
-            return null;
-
-        return value.Value.ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => null
-        };
+            childProperty,
+            out value);
     }
 
-    private static int? GetInt(
+    private static bool TryGetBool(
         JsonElement element,
-        string name)
+        string propertyName,
+        out bool value)
     {
+        value = false;
+
         if (!element.TryGetProperty(
-                name,
-                out var value))
+                propertyName,
+                out var property))
         {
-            return null;
+            return false;
         }
 
-        return value.ValueKind == JsonValueKind.Number &&
-               value.TryGetInt32(out var result)
-            ? result
-            : null;
+        if (property.ValueKind !=
+            JsonValueKind.True &&
+            property.ValueKind !=
+            JsonValueKind.False)
+        {
+            return false;
+        }
+
+        value = property.GetBoolean();
+        return true;
     }
+
+    private static bool TryGetBool(
+        JsonElement element,
+        string parentProperty,
+        string childProperty,
+        out bool value)
+    {
+        value = false;
+
+        if (!element.TryGetProperty(
+                parentProperty,
+                out var parent))
+        {
+            return false;
+        }
+
+        return TryGetBool(
+            parent,
+            childProperty,
+            out value);
+    }
+
+    private static bool TryGetBool(
+        JsonElement element,
+        string parentProperty,
+        string childProperty,
+        string grandChildProperty,
+        out bool value)
+    {
+        value = false;
+
+        if (!element.TryGetProperty(
+                parentProperty,
+                out var parent))
+        {
+            return false;
+        }
+
+        if (!parent.TryGetProperty(
+                childProperty,
+                out var child))
+        {
+            return false;
+        }
+
+        return TryGetBool(
+            child,
+            grandChildProperty,
+            out value);
+    }
+
+    private static bool TryGetArray(
+        JsonElement element,
+        string propertyName,
+        out JsonElement value)
+    {
+        value = default;
+
+        if (!element.TryGetProperty(
+                propertyName,
+                out var property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind !=
+            JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        value = property;
+        return true;
+    }
+
+    private static bool TryGetArray(
+        JsonElement element,
+        string parentProperty,
+        string childProperty,
+        out JsonElement value)
+    {
+        value = default;
+
+        if (!element.TryGetProperty(
+                parentProperty,
+                out var parent))
+        {
+            return false;
+        }
+
+        return TryGetArray(
+            parent,
+            childProperty,
+            out value);
+    }
+
+    private static bool TryGetInt(
+        JsonElement element,
+        string propertyName,
+        out int value)
+    {
+        value = 0;
+
+        if (!element.TryGetProperty(
+                propertyName,
+                out var property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind !=
+            JsonValueKind.Number)
+        {
+            return false;
+        }
+
+        return property.TryGetInt32(
+            out value);
+    }
+
+    // =========================================================
+    // FINDING CREATION
+    // =========================================================
 
     private static void Add(
         List<Finding> findings,
@@ -880,37 +1358,18 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         findings.Add(
             new Finding(
-                Id:
-                    $"{ruleId}-{resource.Id}",
-
-                Category:
-                    category,
-
-                Severity:
-                    severity,
-
-                RuleId:
-                    ruleId,
-
-                Title:
-                    title,
-
-                Description:
-                    description,
-
-                Impact:
-                    impact,
-
-                Recommendation:
-                    recommendation,
-
-                ResourceName:
-                    resource.Name,
-
-                ResourceType:
-                    resource.Type,
-
-                ResourceId:
-                    resource.Id));
+                $"{ruleId}-{resource.Id}",
+                category,
+                severity,
+                ruleId,
+                title,
+                description,
+                impact,
+                recommendation,
+                resource.Name,
+                resource.Type,
+                0,
+                null,
+                resource.Id));
     }
 }

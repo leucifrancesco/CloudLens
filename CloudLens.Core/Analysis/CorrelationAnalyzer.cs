@@ -9,19 +9,16 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         AzureSubscription subscription)
     {
-        var findings =
-            new List<Finding>();
+        ArgumentNullException.ThrowIfNull(resources);
+        ArgumentNullException.ThrowIfNull(subscription);
 
-        AnalyzeVmExposure(
-            resources,
-            findings);
+        var findings = new List<Finding>();
 
-        AnalyzeVmResilience(
-            resources,
-            findings);
-
+        AnalyzeVmExposure(resources, findings);
+        AnalyzeVmResilience(resources, findings);
         AnalyzeStorageResilience(
             resources,
+            subscription,
             findings);
 
         return findings;
@@ -31,49 +28,43 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
-        var resourcesById =
-            resources.ToDictionary(
+        var resourcesById = resources
+            .Where(resource => !string.IsNullOrWhiteSpace(resource.Id))
+            .GroupBy(
                 resource => resource.Id.TrimEnd('/'),
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.First(),
                 StringComparer.OrdinalIgnoreCase);
 
         foreach (var vm in resources.Where(
-                     resource =>
-                         IsType(
-                             resource,
-                             "Microsoft.Compute/virtualMachines")))
+                     resource => IsType(
+                         resource,
+                         "Microsoft.Compute/virtualMachines")))
         {
-            var nics =
-                vm.Relationships
-                    .Where(
-                        relationship =>
-                            relationship.RelationshipType ==
-                            "NetworkInterface")
-                    .Select(
-                        relationship =>
-                            FindResource(
-                                resourcesById,
-                                relationship.TargetResourceId))
-                    .Where(
-                        resource =>
-                            resource != null)
-                    .ToList();
+            var nics = vm.Relationships
+                .Where(relationship =>
+                    string.Equals(
+                        relationship.RelationshipType,
+                        "NetworkInterface",
+                        StringComparison.OrdinalIgnoreCase))
+                .Select(relationship =>
+                    FindResource(
+                        resourcesById,
+                        relationship.TargetResourceId))
+                .OfType<AzureResource>()
+                .ToList();
 
             foreach (var nic in nics)
             {
-                if (nic == null)
-                {
-                    continue;
-                }
-
-                var publicIps =
-                    GetTargets(
+                var publicIps = GetTargets(
                         nic,
                         "PublicIPAddress",
                         resourcesById)
                     .ToList();
 
-                var nsgs =
-                    GetTargets(
+                var nsgs = GetTargets(
                         nic,
                         "NetworkSecurityGroup",
                         resourcesById)
@@ -86,17 +77,13 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                         StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-                if (publicIps.Count == 0 ||
-                    nsgs.Count == 0)
+                if (publicIps.Count == 0 || nsgs.Count == 0)
                 {
                     continue;
                 }
 
                 var exposed =
-                    nsgs.Any(
-                        nsg =>
-                            HasManagementExposure(
-                                nsg));
+                    nsgs.Any(HasManagementExposure);
 
                 if (!exposed)
                 {
@@ -107,41 +94,31 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                     new Finding(
                         Id:
                             $"CORR-VM-PUBLIC-IP-MGMT-EXPOSURE-{vm.Id}",
-
                         Category:
                             Category.Security,
-
                         Severity:
                             Severity.Critical,
-
                         RuleId:
                             "CORR-VM-PUBLIC-IP-MGMT-EXPOSURE",
-
                         Title:
                             "VM esposta a Internet tramite IP pubblico e regole di management",
-
                         Description:
-                            $"La VM {vm.Name} dispone di un percorso " +
+                            $"La VM '{vm.Name}' dispone di un percorso " +
                             "verso un Public IP e almeno un NSG consente " +
                             "traffico inbound di management da Internet.",
-
                         Impact:
                             "La combinazione di esposizione pubblica e " +
-                            "porte di management aumenta significativamente " +
-                            "la superficie di attacco della VM.",
-
+                            "porte di management aumenta la superficie " +
+                            "di attacco della VM.",
                         Recommendation:
                             "Rimuovere l'esposizione pubblica ove possibile " +
                             "e consentire l'accesso amministrativo tramite " +
-                            "Private connectivity, VPN, Bastion o regole " +
+                            "connettività privata, VPN, Bastion o regole " +
                             "di rete fortemente limitate.",
-
                         ResourceName:
                             vm.Name,
-
                         ResourceType:
                             vm.Type,
-
                         ResourceId:
                             vm.Id));
             }
@@ -153,10 +130,9 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         foreach (var vm in resources.Where(
-                     resource =>
-                         IsType(
-                             resource,
-                             "Microsoft.Compute/virtualMachines")))
+                     resource => IsType(
+                         resource,
+                         "Microsoft.Compute/virtualMachines")))
         {
             var properties =
                 vm.GetEffectiveProperties();
@@ -166,11 +142,15 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                 continue;
             }
 
-            var backupProtected =
-                GetBool(
+            // Il dato deve essere disponibile ed esplicitamente false.
+            // Un dato assente o non valido non equivale a backup assente.
+            if (!TryGetBool(
                     properties.Value,
                     "cloudLensBackupProtected",
-                    false);
+                    out var backupProtected))
+            {
+                continue;
+            }
 
             if (backupProtected)
             {
@@ -185,8 +165,7 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                 HasAvailabilitySet(
                     properties.Value);
 
-            if (hasZone ||
-                hasAvailabilitySet)
+            if (hasZone || hasAvailabilitySet)
             {
                 continue;
             }
@@ -195,37 +174,30 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                 new Finding(
                     Id:
                         $"CORR-VM-NO-BACKUP-NO-HA-{vm.Id}",
-
                     Category:
                         Category.Reliability,
-
                     Severity:
                         Severity.Medium,
-
                     RuleId:
                         "CORR-VM-NO-BACKUP-NO-HA",
-
                     Title:
                         "VM senza backup e senza ridondanza infrastrutturale",
-
                     Description:
-                        $"La VM {vm.Name} non risulta protetta da Azure Backup " +
-                        "e non risulta associata a Availability Zone o Availability Set.",
-
+                        $"La VM '{vm.Name}' non risulta protetta da Azure Backup " +
+                        "e non risulta associata ad Availability Zone o " +
+                        "Availability Set, sulla base dei dati raccolti.",
                     Impact:
-                        "La combinazione aumenta il rischio di indisponibilità " +
-                        "e perdita dei dati in caso di failure.",
-
+                        "La combinazione può aumentare il rischio di " +
+                        "indisponibilità e perdita dei dati in caso di failure.",
                     Recommendation:
-                        "Valutare Azure Backup e un meccanismo di ridondanza " +
-                        "coerente con la criticità del workload.",
-
+                        "Verificare RPO, RTO e requisiti di disponibilità " +
+                        "del workload. Valutare una policy Azure Backup e " +
+                        "una configurazione di ridondanza coerente con " +
+                        "la criticità del servizio.",
                     ResourceName:
                         vm.Name,
-
                     ResourceType:
                         vm.Type,
-
                     ResourceId:
                         vm.Id));
         }
@@ -233,85 +205,93 @@ public sealed class CorrelationAnalyzer : IAnalyzer
 
     private static void AnalyzeStorageResilience(
         IReadOnlyList<AzureResource> resources,
+        AzureSubscription subscription,
         List<Finding> findings)
     {
-        var storageAccounts =
-            resources
-                .Where(
-                    resource =>
-                        IsType(
-                            resource,
-                            "Microsoft.Storage/storageAccounts"))
-                .ToList();
+        var storageAccounts = resources
+            .Where(
+                resource => IsType(
+                    resource,
+                    "Microsoft.Storage/storageAccounts"))
+            .ToList();
 
         if (storageAccounts.Count == 0)
         {
             return;
         }
 
-        var locations =
-            storageAccounts
-                .Select(
-                    resource =>
-                        resource.Location)
-                .Where(
-                    location =>
-                        !string.IsNullOrWhiteSpace(
-                            location))
-                .Distinct(
-                    StringComparer.OrdinalIgnoreCase)
-                .ToList();
+        var locations = storageAccounts
+            .Select(resource => resource.Location)
+            .Where(
+                location =>
+                    !string.IsNullOrWhiteSpace(location))
+            .Distinct(
+                StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
+        // La correlazione ha senso solo se gli Storage Account
+        // rilevati sono concentrati in una singola region.
         if (locations.Count != 1)
         {
             return;
         }
 
-        foreach (var storage in storageAccounts)
+        var lrsStorageAccounts =
+            storageAccounts
+                .Where(IsLrs)
+                .ToList();
+
+        if (lrsStorageAccounts.Count == 0)
         {
-            if (!IsLrs(storage))
-            {
-                continue;
-            }
-
-            findings.Add(
-                new Finding(
-                    Id:
-                        $"CORR-STORAGE-SINGLE-REGION-LRS-{storage.Id}",
-
-                    Category:
-                        Category.Reliability,
-
-                    Severity:
-                        Severity.Medium,
-
-                    RuleId:
-                        "CORR-STORAGE-SINGLE-REGION-LRS",
-
-                    Title:
-                        "Storage Account con LRS in ambiente single-region",
-
-                    Description:
-                        $"Lo Storage Account {storage.Name} utilizza LRS " +
-                        "mentre l'ambiente rilevato è distribuito in una sola region.",
-
-                    Impact:
-                        "La combinazione riduce la resilienza geografica " +
-                        "della piattaforma.",
-
-                    Recommendation:
-                        "Valutare una replica ZRS, GRS o GZRS in funzione " +
-                        "dei requisiti di disponibilità e disaster recovery.",
-
-                    ResourceName:
-                        storage.Name,
-
-                    ResourceType:
-                        storage.Type,
-
-                    ResourceId:
-                        storage.Id));
+            return;
         }
+
+        var storageNames =
+            string.Join(
+                ", ",
+                lrsStorageAccounts
+                    .Select(storage => storage.Name)
+                    .Where(
+                        name =>
+                            !string.IsNullOrWhiteSpace(name))
+                    .OrderBy(
+                        name => name,
+                        StringComparer.OrdinalIgnoreCase));
+
+        var region =
+            locations[0];
+
+        findings.Add(
+            new Finding(
+                Id:
+                    $"CORR-STORAGE-SINGLE-REGION-LRS-{subscription.Id}",
+                Category:
+                    Category.Reliability,
+                Severity:
+                    Severity.Medium,
+                RuleId:
+                    "CORR-STORAGE-SINGLE-REGION-LRS",
+                Title:
+                    "Storage con LRS concentrato in una singola region",
+                Description:
+                    $"L'ambiente contiene {lrsStorageAccounts.Count} " +
+                    "Storage Account con LRS concentrati nella region " +
+                    $"'{region}'. Risorse coinvolte: {storageNames}.",
+                Impact:
+                    "La combinazione di una singola region e replica LRS " +
+                    "non fornisce ridondanza geografica e può limitare " +
+                    "le opzioni di disaster recovery in caso di " +
+                    "indisponibilità della region.",
+                Recommendation:
+                    "Verificare i requisiti di RPO, RTO e disaster recovery " +
+                    "del workload. Valutare ZRS, GRS o GZRS in funzione " +
+                    "dei requisiti, dei costi e delle funzionalità supportate.",
+                ResourceName:
+                    subscription.Name,
+                ResourceType:
+                    "Microsoft.Resources/subscriptions",
+                ResourceId:
+                    subscription.Id));
     }
 
     private static bool HasManagementExposure(
@@ -320,22 +300,16 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         var properties =
             nsg.GetEffectiveProperties();
 
-        if (!properties.HasValue)
-        {
-            return false;
-        }
-
-        if (!properties.Value.TryGetProperty(
+        if (!properties.HasValue ||
+            !properties.Value.TryGetProperty(
                 "securityRules",
                 out var rules) ||
-            rules.ValueKind !=
-                JsonValueKind.Array)
+            rules.ValueKind != JsonValueKind.Array)
         {
             return false;
         }
 
-        foreach (var rule in
-                 rules.EnumerateArray())
+        foreach (var rule in rules.EnumerateArray())
         {
             var access =
                 GetString(
@@ -392,10 +366,11 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                 continue;
             }
 
-            if (destinationPort == "22" ||
-                destinationPort == "3389" ||
-                destinationPort == "*" ||
-                destinationPort == "0-65535")
+            if (destinationPort is
+                "22" or
+                "3389" or
+                "*" or
+                "0-65535")
             {
                 return true;
             }
@@ -412,22 +387,21 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         return resource.Relationships
             .Where(
                 relationship =>
-                    relationship.RelationshipType ==
-                    relationshipType)
+                    string.Equals(
+                        relationship.RelationshipType,
+                        relationshipType,
+                        StringComparison.OrdinalIgnoreCase))
             .Select(
                 relationship =>
                     FindResource(
                         resourcesById,
                         relationship.TargetResourceId))
-            .Where(
-                target =>
-                    target != null)!;
+            .OfType<AzureResource>();
     }
 
-    private static IEnumerable<AzureResource>
-        GetTargetsThroughSubnet(
-            AzureResource nic,
-            IReadOnlyDictionary<string, AzureResource> resourcesById)
+    private static IEnumerable<AzureResource> GetTargetsThroughSubnet(
+        AzureResource nic,
+        IReadOnlyDictionary<string, AzureResource> resourcesById)
     {
         var subnets =
             GetTargets(
@@ -447,6 +421,11 @@ public sealed class CorrelationAnalyzer : IAnalyzer
         IReadOnlyDictionary<string, AzureResource> resourcesById,
         string id)
     {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
         var normalized =
             id.TrimEnd('/');
 
@@ -465,9 +444,14 @@ public sealed class CorrelationAnalyzer : IAnalyzer
             return false;
         }
 
-        if (!resource.Sku.Value.TryGetProperty(
+        var sku =
+            resource.Sku.Value;
+
+        if (!sku.TryGetProperty(
                 "name",
-                out var name))
+                out var name) ||
+            name.ValueKind !=
+                JsonValueKind.String)
         {
             return false;
         }
@@ -489,7 +473,8 @@ public sealed class CorrelationAnalyzer : IAnalyzer
             properties.TryGetProperty(
                 "zones",
                 out var zones) &&
-            zones.ValueKind == JsonValueKind.Array &&
+            zones.ValueKind ==
+                JsonValueKind.Array &&
             zones.GetArrayLength() > 0;
     }
 
@@ -511,6 +496,35 @@ public sealed class CorrelationAnalyzer : IAnalyzer
                 id.GetString());
     }
 
+    private static bool TryGetBool(
+        JsonElement element,
+        string propertyName,
+        out bool value)
+    {
+        if (!element.TryGetProperty(
+                propertyName,
+                out var property))
+        {
+            value = false;
+            return false;
+        }
+
+        switch (property.ValueKind)
+        {
+            case JsonValueKind.True:
+                value = true;
+                return true;
+
+            case JsonValueKind.False:
+                value = false;
+                return true;
+
+            default:
+                value = false;
+                return false;
+        }
+    }
+
     private static bool IsType(
         AzureResource resource,
         string type)
@@ -521,40 +535,19 @@ public sealed class CorrelationAnalyzer : IAnalyzer
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool GetBool(
-        JsonElement element,
-        string propertyName,
-        bool defaultValue)
-    {
-        if (!element.TryGetProperty(
-                propertyName,
-                out var value))
-        {
-            return defaultValue;
-        }
-
-        return value.ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => defaultValue
-        };
-    }
-
     private static string? GetString(
         JsonElement element,
         string propertyName)
     {
         if (!element.TryGetProperty(
                 propertyName,
-                out var value))
+                out var value) ||
+            value.ValueKind !=
+                JsonValueKind.String)
         {
             return null;
         }
 
-        return value.ValueKind ==
-               JsonValueKind.String
-            ? value.GetString()
-            : null;
+        return value.GetString();
     }
 }
