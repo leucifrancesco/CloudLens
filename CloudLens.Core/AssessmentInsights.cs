@@ -7,185 +7,146 @@ namespace CloudLens.Core;
 public sealed class AssessmentInsights
 {
     public IReadOnlyList<AssessmentSeveritySummary> Severity { get; init; } = [];
-
     public IReadOnlyList<AssessmentCategorySummary> Categories { get; init; } = [];
-
     public IReadOnlyList<AssessmentRiskItem> TopRisks { get; init; } = [];
-
     public IReadOnlyList<AssessmentRemediationSummary> Remediation { get; init; } = [];
-
     public AssessmentCoverageSummary Coverage { get; init; } = new();
 
-    public int TotalFindings =>
-        Severity.Sum(x => x.Count);
+    public int TotalFindings => Severity.Sum(x => x.Count);
 
-    public int TotalRemediations =>
-        Remediation.Sum(x => x.Count);
+    public int TotalRemediations => Remediation.Sum(x => x.Count);
 
-    public static AssessmentInsights Build(
-        TenantScanResult assessment)
+    public static AssessmentInsights Build(TenantScanResult assessment)
     {
         if (assessment == null)
         {
-            throw new ArgumentNullException(
-                nameof(assessment));
+            throw new ArgumentNullException(nameof(assessment));
         }
 
-        var findings =
-            assessment.AllFindings
-                .ToList();
+        var findings = assessment.AllFindings.ToList();
 
-        var remediationActions =
-            assessment.Subscriptions
-                .SelectMany(
-                    x => x.Result.Remediation.Actions)
-                .ToList();
+        var remediationActions = assessment.Subscriptions
+            .SelectMany(x => x.Result.Remediation.Actions)
+            .ToList();
 
-        var severity =
-            Enum.GetValues<SeverityType>()
-                .Select(
-                    value =>
-                        new AssessmentSeveritySummary(
-                            value,
-                            findings.Count(
-                                finding =>
-                                    finding.Severity == value)))
-                .ToList();
+        var severity = Enum.GetValues<SeverityType>()
+            .Select(value => new AssessmentSeveritySummary(
+                value,
+                findings.Count(finding => finding.Severity == value)))
+            .ToList();
 
-        var categories =
-            Enum.GetValues<CategoryType>()
-                .Select(
-                    category =>
-                    {
-                        var categoryFindings =
-                            findings
-                                .Where(
-                                    finding =>
-                                        finding.Category == category)
-                                .ToList();
-
-                        var score =
-                            assessment.ScoresByCategory.TryGetValue(
-                                category,
-                                out var categoryScore)
-                                ? categoryScore
-                                : 100;
-
-                        return new AssessmentCategorySummary(
-                            category,
-                            score,
-                            categoryFindings.Count,
-                            categoryFindings.Count(
-                                x =>
-                                    x.Severity ==
-                                    SeverityType.Critical),
-                            categoryFindings.Count(
-                                x =>
-                                    x.Severity ==
-                                    SeverityType.High),
-                            categoryFindings.Count(
-                                x =>
-                                    x.Severity ==
-                                    SeverityType.Medium),
-                            categoryFindings.Count(
-                                x =>
-                                    x.Severity ==
-                                    SeverityType.Low));
-                    })
-                .OrderByDescending(
-                    x => x.FindingCount)
-                .ThenBy(
-                    x => x.Score)
-                .ToList();
-
-        var topRisks =
-            findings
-                .OrderBy(
-                    x =>
-                        SeverityOrder(
-                            x.Severity))
-                .ThenByDescending(
-                    x => x.MonthlySavingEur)
-                .ThenBy(
-                    x => x.Category)
-                .Take(10)
-                .Select(
-                    finding =>
-                        new AssessmentRiskItem(
-                            finding.Id,
-                            finding.RuleId,
-                            finding.Title,
-                            finding.Category,
-                            finding.Severity,
-                            finding.ResourceName,
-                            finding.ResourceType,
-                            finding.ResourceId,
-                            finding.Impact,
-                            finding.Recommendation,
-                            finding.MonthlySavingEur))
-                .ToList();
-
-        var remediation =
-            Enum.GetValues<RemediationStatus>()
-                .Select(
-                    status =>
-                        new AssessmentRemediationSummary(
-                            status,
-                            remediationActions.Count(
-                                x =>
-                                    x.Status == status),
-                            remediationActions.Count(
-                                x =>
-                                    x.Status == status &&
-                                    x.Severity ==
-                                    SeverityType.Critical),
-                            remediationActions.Count(
-                                x =>
-                                    x.Status == status &&
-                                    x.Severity ==
-                                    SeverityType.High)))
-                .ToList();
-
-        var coverage =
-            new AssessmentCoverageSummary
+        var categories = Enum.GetValues<CategoryType>()
+            .Select(category =>
             {
-                TotalResources =
-                    assessment.Coverage.TotalResources,
+                var categoryFindings = findings
+                    .Where(finding => finding.Category == category)
+                    .ToList();
 
-                EnrichedResources =
-                    assessment.Coverage.EnrichedResources,
+                var score = assessment.ScoresByCategory.TryGetValue(
+                    category,
+                    out var categoryScore)
+                    ? categoryScore
+                    : 100;
 
-                EnrichmentCoveragePercent =
-                    assessment.Coverage
-                        .ResourceEnrichmentCoveragePercent,
+                return new AssessmentCategorySummary(
+                    category,
+                    score,
+                    categoryFindings.Count,
+                    categoryFindings.Count(
+                        x => x.Severity == SeverityType.Critical),
+                    categoryFindings.Count(
+                        x => x.Severity == SeverityType.High),
+                    categoryFindings.Count(
+                        x => x.Severity == SeverityType.Medium),
+                    categoryFindings.Count(
+                        x => x.Severity == SeverityType.Low));
+            })
+            .OrderByDescending(x => x.FindingCount)
+            .ThenBy(x => x.Score)
+            .ToList();
 
-                TotalResourceTypes =
-                    assessment.Coverage.TotalResourceTypes,
+        // =====================================================
+        // TOP RISKS
+        // =====================================================
+        // AssessmentIntelligence is the single source of truth
+        // for risk prioritization. Do not recalculate a separate
+        // severity-only ranking here.
+        var topRisks = assessment.Intelligence.Risks
+            .OrderBy(x => x.Priority)
+            .ThenByDescending(x => x.PriorityScore)
+            .ThenBy(x => SeverityOrder(x.Severity))
+            .ThenBy(
+                x => x.Title,
+                StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .Select(risk => new AssessmentRiskItem(
+                risk.FindingId,
+                risk.RuleId,
+                risk.Title,
+                risk.Category,
+                risk.Severity,
+                risk.ResourceName,
+                risk.ResourceType,
+                risk.ResourceId,
+                FindImpact(
+                    findings,
+                    risk.FindingId),
+                FindRecommendation(
+                    findings,
+                    risk.FindingId),
+                risk.MonthlySavingEur))
+            .ToList();
 
-                SupportedResourceTypes =
-                    assessment.Coverage.SupportedResourceTypes,
+        var remediation = Enum.GetValues<RemediationStatus>()
+            .Select(status => new AssessmentRemediationSummary(
+                status,
+                remediationActions.Count(
+                    x => x.Status == status),
+                remediationActions.Count(
+                    x =>
+                        x.Status == status &&
+                        x.Severity == SeverityType.Critical),
+                remediationActions.Count(
+                    x =>
+                        x.Status == status &&
+                        x.Severity == SeverityType.High)))
+            .ToList();
 
-                GenericResourceTypes =
-                    assessment.Coverage.GenericResourceTypes,
+        var coverage = new AssessmentCoverageSummary
+        {
+            TotalResources =
+                assessment.Coverage.TotalResources,
 
-                UnsupportedResourceTypes =
-                    assessment.Coverage.UnsupportedResourceTypes,
+            EnrichedResources =
+                assessment.Coverage.EnrichedResources,
 
-                ResourceTypeCoveragePercent =
-                    assessment.Coverage.ResourceTypeCoveragePercent,
+            EnrichmentCoveragePercent =
+                assessment.Coverage.ResourceEnrichmentCoveragePercent,
 
-                SpecializedAnalyzerCoveragePercent =
-                    assessment.Coverage
-                        .SpecializedAnalyzerCoveragePercent,
+            TotalResourceTypes =
+                assessment.Coverage.TotalResourceTypes,
 
-                MetricCapableResources =
-                    assessment.Coverage
-                        .MetricCapableResources,
+            SupportedResourceTypes =
+                assessment.Coverage.SupportedResourceTypes,
 
-                MetricProfiles =
-                    assessment.Coverage
-                        .MetricProfiles
-            };
+            GenericResourceTypes =
+                assessment.Coverage.GenericResourceTypes,
+
+            UnsupportedResourceTypes =
+                assessment.Coverage.UnsupportedResourceTypes,
+
+            ResourceTypeCoveragePercent =
+                assessment.Coverage.ResourceTypeCoveragePercent,
+
+            SpecializedAnalyzerCoveragePercent =
+                assessment.Coverage.SpecializedAnalyzerCoveragePercent,
+
+            MetricCapableResources =
+                assessment.Coverage.MetricCapableResources,
+
+            MetricProfiles =
+                assessment.Coverage.MetricProfiles
+        };
 
         return new AssessmentInsights
         {
@@ -195,6 +156,36 @@ public sealed class AssessmentInsights
             Remediation = remediation,
             Coverage = coverage
         };
+    }
+
+    private static string FindImpact(
+        IReadOnlyList<Finding> findings,
+        string findingId)
+    {
+        return findings
+            .FirstOrDefault(
+                finding =>
+                    string.Equals(
+                        finding.Id,
+                        findingId,
+                        StringComparison.OrdinalIgnoreCase))
+            ?.Impact
+            ?? string.Empty;
+    }
+
+    private static string FindRecommendation(
+        IReadOnlyList<Finding> findings,
+        string findingId)
+    {
+        return findings
+            .FirstOrDefault(
+                finding =>
+                    string.Equals(
+                        finding.Id,
+                        findingId,
+                        StringComparison.OrdinalIgnoreCase))
+            ?.Recommendation
+            ?? string.Empty;
     }
 
     private static int SeverityOrder(
