@@ -13,89 +13,68 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
 
         foreach (var resource in resources)
         {
-            var type = resource.Type.ToLowerInvariant();
-
-            switch (type)
+            switch (resource.Type.ToLowerInvariant())
             {
                 case "microsoft.compute/virtualmachines":
                     AnalyzeVirtualMachine(resource, findings);
                     break;
-
                 case "microsoft.compute/virtualmachinescalesets":
                     AnalyzeVmScaleSet(resource, findings);
                     break;
-
                 case "microsoft.network/virtualnetworks/subnets":
                     AnalyzeSubnet(resource, resources, findings);
                     break;
-
                 case "microsoft.network/networkinterfaces":
                     AnalyzeNetworkInterface(resource, findings);
                     break;
-
                 case "microsoft.network/applicationgateways":
                     AnalyzeApplicationGateway(resource, findings);
                     break;
-
                 case "microsoft.network/privateendpoints":
                     AnalyzePrivateEndpoint(resource, findings);
                     break;
-
                 case "microsoft.web/sites":
                     AnalyzeWebApp(resource, findings);
                     break;
-
                 case "microsoft.web/serverfarms":
                     AnalyzeAppServicePlan(resource, findings);
                     break;
-
                 case "microsoft.sql/servers/databases":
                     AnalyzeSqlDatabase(resource, findings);
                     break;
-
                 case "microsoft.sql/servers":
-                    AnalyzeSqlServer(resource, findings);
+                    AnalyzeSqlServer(resource, resources, findings);
                     break;
-
                 case "microsoft.documentdb/databaseaccounts":
-                    AnalyzeCosmosDb(resource, findings);
+                    AnalyzeCosmosDb(resource, resources, findings);
                     break;
-
                 case "microsoft.containerservice/managedclusters":
                     AnalyzeAks(resource, findings);
                     break;
-
                 case "microsoft.containerregistry/registries":
-                    AnalyzeAcr(resource, findings);
+                    AnalyzeAcr(resource, resources, findings);
                     break;
-
                 case "microsoft.messaging/namespaces":
-                    AnalyzeMessaging(resource, findings);
+                    AnalyzeMessaging(resource, resources, findings);
                     break;
-
                 case "microsoft.recoveryservices/vaults":
                     AnalyzeRecoveryServicesVault(resource, findings);
                     break;
-
                 case "microsoft.operationalinsights/workspaces":
                     AnalyzeLogAnalyticsWorkspace(resource, findings);
                     break;
-
                 case "microsoft.insights/components":
                     AnalyzeApplicationInsights(resource, findings);
                     break;
-
                 case "microsoft.cognitiveservices/accounts":
-                    AnalyzeCognitiveServices(resource, findings);
+                    AnalyzeCognitiveServices(resource, resources, findings);
                     break;
-
                 case "microsoft.apimanagement/service":
-                    AnalyzeApiManagement(resource, findings);
+                    AnalyzeApiManagement(resource, resources, findings);
                     break;
-
                 case "microsoft.dbforpostgresql/flexibleservers":
                 case "microsoft.dbformysql/flexibleservers":
-                    AnalyzeFlexibleDatabase(resource, findings);
+                    AnalyzeFlexibleDatabase(resource, resources, findings);
                     break;
             }
         }
@@ -112,7 +91,6 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
@@ -125,8 +103,7 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
             !secureBootEnabled)
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "SEC-VM-SECURE-BOOT-DISABLED",
                 Severity.Medium,
                 "Secure Boot disabilitato",
@@ -145,23 +122,14 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         AzureResource resource,
         List<Finding> findings)
     {
-        var sku = resource.Sku;
-
-        if (!sku.HasValue)
+        if (!resource.Sku.HasValue)
             return;
 
-        if (TryGetString(
-                sku.Value,
-                "name",
-                out var skuName) &&
-            string.Equals(
-                skuName,
-                "Basic",
-                StringComparison.OrdinalIgnoreCase))
+        if (TryGetString(resource.Sku.Value, "name", out var skuName) &&
+            string.Equals(skuName, "Basic", StringComparison.OrdinalIgnoreCase))
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "COST-VMSS-BASIC-SKU",
                 Severity.Low,
                 "VM Scale Set con SKU Basic",
@@ -182,29 +150,13 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
-        var nsg = GetProperty(
-            properties.Value,
-            "networkSecurityGroup");
-
-        if (nsg.HasValue)
+        if (GetProperty(properties.Value, "networkSecurityGroup").HasValue)
             return;
 
-        /*
-         * Una subnet senza NSG non è necessariamente un problema.
-         *
-         * Il finding viene generato solamente quando la subnet
-         * risulta effettivamente utilizzata da almeno una NIC.
-         *
-         * AzureRelationshipBuilder costruisce:
-         *
-         * NIC -> Subnet
-         */
-
-        var subnetId = resource.Id;
+        var subnetId = NormalizeId(resource.Id);
 
         var hasNetworkInterface = resources.Any(otherResource =>
             string.Equals(
@@ -217,7 +169,7 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                     "Subnet",
                     StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(
-                    relationship.TargetResourceId,
+                    NormalizeId(relationship.TargetResourceId),
                     subnetId,
                     StringComparison.OrdinalIgnoreCase)));
 
@@ -225,8 +177,7 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
             return;
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "SEC-SUBNET-NO-NSG",
             Severity.Low,
             "Subnet utilizzata senza NSG associato",
@@ -245,52 +196,24 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
-        if (!TryGetArray(
-                properties.Value,
-                "ipConfigurations",
-                out var ipConfigurations))
-        {
+        if (!TryGetArray(properties.Value, "ipConfigurations", out var configurations))
             return;
-        }
 
-        foreach (var configuration in
-                 ipConfigurations.EnumerateArray())
+        foreach (var configuration in configurations.EnumerateArray())
         {
-            if (!TryGetProperty(
-                    configuration,
-                    "properties",
-                    out var ipProperties))
-            {
-                continue;
-            }
-
-            if (!TryGetProperty(
-                    ipProperties,
-                    "publicIPAddress",
-                    out var publicIp))
-            {
-                continue;
-            }
-
-            if (publicIp.ValueKind != JsonValueKind.Object)
-                continue;
-
-            if (!TryGetString(
-                    publicIp,
-                    "id",
-                    out var publicIpId) ||
-                string.IsNullOrWhiteSpace(publicIpId))
+            if (!TryGetProperty(configuration, "properties", out var ipProperties) ||
+                !TryGetProperty(ipProperties, "publicIPAddress", out var publicIp) ||
+                publicIp.ValueKind != JsonValueKind.Object ||
+                !TryGetString(publicIp, "id", out var publicIpId))
             {
                 continue;
             }
 
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "SEC-NIC-PUBLIC-IP",
                 Severity.Medium,
                 "Network Interface associata a un Public IP",
@@ -298,7 +221,6 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                 "L'associazione di un Public IP rende la risorsa potenzialmente raggiungibile direttamente da Internet, a seconda delle regole NSG e degli altri controlli di rete.",
                 "Verificare se l'esposizione pubblica è necessaria e applicare NSG e altri controlli di rete appropriati.",
                 Category.Security);
-
             break;
         }
     }
@@ -312,44 +234,23 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!properties.HasValue ||
+            !TryGetArray(properties.Value, "httpListeners", out var listeners))
             return;
-
-        if (!TryGetArray(
-                properties.Value,
-                "httpListeners",
-                out var listeners))
-        {
-            return;
-        }
 
         foreach (var listener in listeners.EnumerateArray())
         {
-            if (!TryGetProperty(
-                    listener,
-                    "properties",
-                    out var listenerProperties))
-            {
+            if (!TryGetProperty(listener, "properties", out var listenerProperties))
                 continue;
-            }
-
-            var protocol =
-                GetString(
-                    listenerProperties,
-                    "protocol");
 
             if (!string.Equals(
-                    protocol,
+                    GetString(listenerProperties, "protocol"),
                     "Http",
                     StringComparison.OrdinalIgnoreCase))
-            {
                 continue;
-            }
 
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "SEC-APPGW-HTTP-LISTENER",
                 Severity.Medium,
                 "Application Gateway con listener HTTP",
@@ -357,7 +258,6 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                 "Il traffico gestito dal listener HTTP non utilizza TLS sul tratto client-to-gateway.",
                 "Valutare la conversione del listener a HTTPS e l'utilizzo di un certificato TLS valido.",
                 Category.Security);
-
             break;
         }
     }
@@ -371,52 +271,26 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!properties.HasValue ||
+            !TryGetArray(properties.Value, "privateLinkServiceConnections", out var connections))
             return;
-
-        if (!TryGetArray(
-                properties.Value,
-                "privateLinkServiceConnections",
-                out var connections))
-        {
-            return;
-        }
 
         foreach (var connection in connections.EnumerateArray())
         {
-            if (!TryGetProperty(
-                    connection,
-                    "properties",
-                    out var connectionProperties))
-            {
-                continue;
-            }
-
-            if (!TryGetProperty(
+            if (!TryGetProperty(connection, "properties", out var connectionProperties) ||
+                !TryGetProperty(
                     connectionProperties,
                     "privateLinkServiceConnectionState",
                     out var connectionState))
-            {
                 continue;
-            }
 
-            var status =
-                GetString(
-                    connectionState,
-                    "status");
+            var status = GetString(connectionState, "status");
 
-            if (string.Equals(
-                    status,
-                    "Approved",
-                    StringComparison.OrdinalIgnoreCase))
-            {
+            if (string.Equals(status, "Approved", StringComparison.OrdinalIgnoreCase))
                 continue;
-            }
 
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "OPS-PRIVATE-ENDPOINT-UNRESOLVED",
                 Severity.Medium,
                 "Private Endpoint con connessione non approvata",
@@ -424,7 +298,6 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                 "La connessione al servizio target potrebbe non essere operativa.",
                 "Verificare lo stato della connessione e completare l'approvazione se prevista dall'architettura.",
                 Category.Operations);
-
             break;
         }
     }
@@ -438,19 +311,13 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
-        if (TryGetBool(
-                properties.Value,
-                "httpsOnly",
-                out var httpsOnly) &&
-            !httpsOnly)
+        if (TryGetBool(properties.Value, "httpsOnly", out var httpsOnly) && !httpsOnly)
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "SEC-APP-NO-HTTPS",
                 Severity.Medium,
                 "Web App senza HTTPS obbligatorio",
@@ -460,18 +327,11 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                 Category.Security);
         }
 
-        if (TryGetString(
-                properties.Value,
-                "ftpState",
-                out var ftpState) &&
-            string.Equals(
-                ftpState,
-                "AllAllowed",
-                StringComparison.OrdinalIgnoreCase))
+        if (TryGetString(properties.Value, "ftpState", out var ftpState) &&
+            string.Equals(ftpState, "AllAllowed", StringComparison.OrdinalIgnoreCase))
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "SEC-APP-FTP-ALL",
                 Severity.Medium,
                 "Web App con accesso FTP non cifrato consentito",
@@ -490,32 +350,16 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         AzureResource resource,
         List<Finding> findings)
     {
-        if (!resource.Sku.HasValue)
+        if (!resource.Sku.HasValue ||
+            !TryGetString(resource.Sku.Value, "name", out var skuName))
             return;
 
-        if (!TryGetString(
-                resource.Sku.Value,
-                "name",
-                out var skuName))
-        {
+        if (!string.Equals(skuName, "F1", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(skuName, "D1", StringComparison.OrdinalIgnoreCase))
             return;
-        }
-
-        if (!string.Equals(
-                skuName,
-                "F1",
-                StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(
-                skuName,
-                "D1",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "COST-APPPLAN-FREE",
             Severity.Low,
             "App Service Plan con tier Free/Shared",
@@ -534,19 +378,13 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
-        if (TryGetBool(
-                properties.Value,
-                "paused",
-                out var paused) &&
-            paused)
+        if (TryGetBool(properties.Value, "paused", out var paused) && paused)
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "COST-SQLDB-PAUSED",
                 Severity.Low,
                 "SQL Database attualmente in stato paused",
@@ -563,38 +401,21 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
 
     private static void AnalyzeSqlServer(
         AzureResource resource,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!properties.HasValue ||
+            !TryGetString(properties.Value, "publicNetworkAccess", out var access) ||
+            !string.Equals(access, "Enabled", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!TryGetString(
-                properties.Value,
-                "publicNetworkAccess",
-                out var publicNetworkAccess))
-        {
-            return;
-        }
-
-        if (!string.Equals(
-                publicNetworkAccess,
-                "Enabled",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (HasPrivateEndpointConnection(resource) ||
+        if (HasPrivateEndpointConnection(resource, resources) ||
             HasNetworkRestriction(properties.Value))
-        {
             return;
-        }
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "SEC-DB-PUBLIC-NETWORK",
             Severity.Medium,
             "SQL Server accessibile tramite rete pubblica",
@@ -610,38 +431,21 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
 
     private static void AnalyzeCosmosDb(
         AzureResource resource,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!properties.HasValue ||
+            !TryGetString(properties.Value, "publicNetworkAccess", out var access) ||
+            !string.Equals(access, "Enabled", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!TryGetString(
-                properties.Value,
-                "publicNetworkAccess",
-                out var publicNetworkAccess))
-        {
-            return;
-        }
-
-        if (!string.Equals(
-                publicNetworkAccess,
-                "Enabled",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (HasPrivateEndpointConnection(resource) ||
+        if (HasPrivateEndpointConnection(resource, resources) ||
             HasNetworkRestriction(properties.Value))
-        {
             return;
-        }
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "SEC-COSMOS-PUBLIC-NETWORK",
             Severity.Medium,
             "Cosmos DB accessibile tramite rete pubblica",
@@ -660,51 +464,43 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
-        if (TryGetBool(
+        var isPrivateCluster =
+            TryGetBool(
                 properties.Value,
                 "apiServerAccessProfile",
                 "enablePrivateCluster",
                 out var privateCluster) &&
-            privateCluster)
-        {
-            return;
-        }
+            privateCluster;
 
         var hasAuthorizedIpRanges =
             TryGetArray(
                 properties.Value,
                 "apiServerAccessProfile",
                 "authorizedIpRanges",
-                out var authorizedIpRanges) &&
-            authorizedIpRanges.GetArrayLength() > 0;
+                out var ranges) &&
+            ranges.GetArrayLength() > 0;
 
-        if (hasAuthorizedIpRanges)
-            return;
+        if (!isPrivateCluster && !hasAuthorizedIpRanges)
+        {
+            Add(
+                findings, resource,
+                "SEC-AKS-PUBLIC-API",
+                Severity.Medium,
+                "AKS con API Server pubblicamente accessibile",
+                "Il cluster AKS non risulta private e non presenta authorized IP ranges valorizzati nei dati raccolti.",
+                "L'API Server può risultare raggiungibile da reti non previste, aumentando la superficie di attacco amministrativa.",
+                "Valutare un private cluster oppure limitare l'accesso tramite authorized IP ranges.",
+                Category.Security);
+        }
 
-        Add(
-            findings,
-            resource,
-            "SEC-AKS-PUBLIC-API",
-            Severity.Medium,
-            "AKS con API Server pubblicamente accessibile",
-            "Il cluster AKS non risulta private e non presenta authorized IP ranges valorizzati nei dati raccolti.",
-            "L'API Server può risultare raggiungibile da reti non previste, aumentando la superficie di attacco amministrativa.",
-            "Valutare un private cluster oppure limitare l'accesso tramite authorized IP ranges.",
-            Category.Security);
-
-        if (TryGetBool(
-                properties.Value,
-                "disableLocalAccounts",
-                out var disableLocalAccounts) &&
+        if (TryGetBool(properties.Value, "disableLocalAccounts", out var disableLocalAccounts) &&
             !disableLocalAccounts)
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "SEC-AKS-LOCAL-ACCOUNTS",
                 Severity.Medium,
                 "AKS con account locali abilitati",
@@ -721,22 +517,18 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
 
     private static void AnalyzeAcr(
         AzureResource resource,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
-        if (TryGetBool(
-                properties.Value,
-                "adminUserEnabled",
-                out var adminUserEnabled) &&
+        if (TryGetBool(properties.Value, "adminUserEnabled", out var adminUserEnabled) &&
             adminUserEnabled)
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "SEC-ACR-ADMIN-USER",
                 Severity.Medium,
                 "Azure Container Registry con admin user abilitato",
@@ -746,27 +538,16 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
                 Category.Security);
         }
 
-        if (!TryGetString(
-                properties.Value,
-                "publicNetworkAccess",
-                out var publicNetworkAccess) ||
-            !string.Equals(
-                publicNetworkAccess,
-                "Enabled",
-                StringComparison.OrdinalIgnoreCase))
-        {
+        if (!TryGetString(properties.Value, "publicNetworkAccess", out var access) ||
+            !string.Equals(access, "Enabled", StringComparison.OrdinalIgnoreCase))
             return;
-        }
 
-        if (HasPrivateEndpointConnection(resource) ||
+        if (HasPrivateEndpointConnection(resource, resources) ||
             HasNetworkRestriction(properties.Value))
-        {
             return;
-        }
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "SEC-ACR-PUBLIC-NETWORK",
             Severity.Medium,
             "Azure Container Registry accessibile tramite rete pubblica",
@@ -782,34 +563,21 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
 
     private static void AnalyzeMessaging(
         AzureResource resource,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!properties.HasValue ||
+            !TryGetString(properties.Value, "publicNetworkAccess", out var access) ||
+            !string.Equals(access, "Enabled", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!TryGetString(
-                properties.Value,
-                "publicNetworkAccess",
-                out var publicNetworkAccess) ||
-            !string.Equals(
-                publicNetworkAccess,
-                "Enabled",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (HasPrivateEndpointConnection(resource) ||
+        if (HasPrivateEndpointConnection(resource, resources) ||
             HasNetworkRestriction(properties.Value))
-        {
             return;
-        }
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "SEC-MESSAGING-PUBLIC-NETWORK",
             Severity.Medium,
             "Messaging namespace accessibile tramite rete pubblica",
@@ -828,19 +596,14 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
-        if (TryGetBool(
-                properties.Value,
-                "softDeleteFeatureState",
-                out var softDeleteEnabled) &&
+        if (TryGetBool(properties.Value, "softDeleteFeatureState", out var softDeleteEnabled) &&
             !softDeleteEnabled)
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "SEC-BACKUP-SOFTDELETE",
                 Severity.High,
                 "Soft Delete del Recovery Services Vault non abilitato",
@@ -860,24 +623,13 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
-            return;
-
-        if (!TryGetInt(
-                properties.Value,
-                "retentionInDays",
-                out var retentionDays))
-        {
-            return;
-        }
-
-        if (retentionDays >= 30)
+        if (!properties.HasValue ||
+            !TryGetInt(properties.Value, "retentionInDays", out var retentionDays) ||
+            retentionDays >= 30)
             return;
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "OPS-LOG-RETENTION-LOW",
             Severity.Low,
             "Log Analytics con retention inferiore a 30 giorni",
@@ -896,23 +648,15 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
         if (!properties.HasValue)
             return;
 
-        if (!TryGetString(
-                properties.Value,
-                "Application_Type",
-                out var applicationType))
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(applicationType))
+        if (properties.Value.TryGetProperty("Application_Type", out var appType) &&
+            appType.ValueKind == JsonValueKind.String &&
+            string.IsNullOrWhiteSpace(appType.GetString()))
         {
             Add(
-                findings,
-                resource,
+                findings, resource,
                 "OPS-APPINSIGHTS-CONFIG",
                 Severity.Low,
                 "Application Insights con configurazione incompleta",
@@ -929,34 +673,21 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
 
     private static void AnalyzeCognitiveServices(
         AzureResource resource,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!properties.HasValue ||
+            !TryGetString(properties.Value, "publicNetworkAccess", out var access) ||
+            !string.Equals(access, "Enabled", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!TryGetString(
-                properties.Value,
-                "publicNetworkAccess",
-                out var publicNetworkAccess) ||
-            !string.Equals(
-                publicNetworkAccess,
-                "Enabled",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (HasPrivateEndpointConnection(resource) ||
+        if (HasPrivateEndpointConnection(resource, resources) ||
             HasNetworkRestriction(properties.Value))
-        {
             return;
-        }
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "SEC-AI-PUBLIC-NETWORK",
             Severity.Medium,
             "Cognitive Services accessibile tramite rete pubblica",
@@ -972,34 +703,21 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
 
     private static void AnalyzeApiManagement(
         AzureResource resource,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!properties.HasValue ||
+            !TryGetString(properties.Value, "publicNetworkAccess", out var access) ||
+            !string.Equals(access, "Enabled", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!TryGetString(
-                properties.Value,
-                "publicNetworkAccess",
-                out var publicNetworkAccess) ||
-            !string.Equals(
-                publicNetworkAccess,
-                "Enabled",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (HasPrivateEndpointConnection(resource) ||
+        if (HasPrivateEndpointConnection(resource, resources) ||
             HasNetworkRestriction(properties.Value))
-        {
             return;
-        }
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "SEC-APIM-PUBLIC-NETWORK",
             Severity.Medium,
             "API Management accessibile tramite rete pubblica",
@@ -1015,34 +733,21 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
 
     private static void AnalyzeFlexibleDatabase(
         AzureResource resource,
+        IReadOnlyList<AzureResource> resources,
         List<Finding> findings)
     {
         var properties = resource.GetEffectiveProperties();
-
-        if (!properties.HasValue)
+        if (!properties.HasValue ||
+            !TryGetString(properties.Value, "publicNetworkAccess", out var access) ||
+            !string.Equals(access, "Enabled", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (!TryGetString(
-                properties.Value,
-                "publicNetworkAccess",
-                out var publicNetworkAccess) ||
-            !string.Equals(
-                publicNetworkAccess,
-                "Enabled",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (HasPrivateEndpointConnection(resource) ||
+        if (HasPrivateEndpointConnection(resource, resources) ||
             HasNetworkRestriction(properties.Value))
-        {
             return;
-        }
 
         Add(
-            findings,
-            resource,
+            findings, resource,
             "SEC-DB-PUBLIC-NETWORK",
             Severity.Medium,
             "Flexible Database accessibile tramite rete pubblica",
@@ -1057,51 +762,100 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     // =========================================================
 
     private static bool HasPrivateEndpointConnection(
-        AzureResource resource)
+        AzureResource resource,
+        IReadOnlyList<AzureResource> resources)
     {
-        return resource.Relationships.Any(
-            relationship =>
+        var targetId = NormalizeId(resource.Id);
+
+        foreach (var endpoint in resources)
+        {
+            if (!string.Equals(
+                    endpoint.Type,
+                    "Microsoft.Network/privateEndpoints",
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var hasTargetRelationship = endpoint.Relationships.Any(relationship =>
                 string.Equals(
                     relationship.RelationshipType,
                     "PrivateLinkTarget",
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    NormalizeId(relationship.TargetResourceId),
+                    targetId,
                     StringComparison.OrdinalIgnoreCase));
-    }
 
-    private static bool HasNetworkRestriction(
-        JsonElement properties)
-    {
-        if (HasDefaultActionDeny(properties))
-            return true;
+            if (!hasTargetRelationship)
+                continue;
 
-        if (TryGetArray(
-                properties,
-                "networkAcls",
-                out var networkAcls))
-        {
-            foreach (var acl in networkAcls.EnumerateArray())
+            var properties = endpoint.GetEffectiveProperties();
+            if (!properties.HasValue ||
+                !TryGetArray(
+                    properties.Value,
+                    "privateLinkServiceConnections",
+                    out var connections))
+                continue;
+
+            foreach (var connection in connections.EnumerateArray())
             {
-                if (acl.ValueKind != JsonValueKind.Object)
-                    continue;
-
-                if (TryGetString(
-                        acl,
-                        "defaultAction",
-                        out var defaultAction) &&
-                    string.Equals(
-                        defaultAction,
-                        "Deny",
-                        StringComparison.OrdinalIgnoreCase))
+                if (!TryGetProperty(
+                        connection,
+                        "properties",
+                        out var connectionProperties) ||
+                    !TryGetString(
+                        connectionProperties,
+                        "privateLinkServiceId",
+                        out var linkedResourceId) ||
+                    string.IsNullOrWhiteSpace(linkedResourceId) ||
+                    !string.Equals(
+                        NormalizeId(linkedResourceId),
+                        targetId,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !TryGetProperty(
+                        connectionProperties,
+                        "privateLinkServiceConnectionState",
+                        out var connectionState))
                 {
-                    return true;
+                    continue;
                 }
+
+                if (TryGetString(connectionState, "status", out var status) &&
+                    string.Equals(
+                        status,
+                        "Approved",
+                        StringComparison.OrdinalIgnoreCase))
+                    return true;
             }
         }
 
         return false;
     }
 
-    private static bool HasDefaultActionDeny(
-        JsonElement properties)
+    private static bool HasNetworkRestriction(JsonElement properties)
+    {
+        if (HasDefaultActionDeny(properties))
+            return true;
+
+        if (!TryGetArray(properties, "networkAcls", out var networkAcls))
+            return false;
+
+        foreach (var acl in networkAcls.EnumerateArray())
+        {
+            if (acl.ValueKind != JsonValueKind.Object)
+                continue;
+
+            if (TryGetString(acl, "defaultAction", out var defaultAction) &&
+                string.Equals(
+                    defaultAction,
+                    "Deny",
+                    StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasDefaultActionDeny(JsonElement properties)
     {
         return TryGetString(
                 properties,
@@ -1122,9 +876,7 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         JsonElement element,
         string propertyName)
     {
-        return element.TryGetProperty(
-                propertyName,
-                out var value)
+        return element.TryGetProperty(propertyName, out var value)
             ? value
             : null;
     }
@@ -1134,19 +886,14 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
         string propertyName,
         out JsonElement value)
     {
-        return element.TryGetProperty(
-            propertyName,
-            out value);
+        return element.TryGetProperty(propertyName, out value);
     }
 
     private static string? GetString(
         JsonElement element,
         string propertyName)
     {
-        return TryGetString(
-                element,
-                propertyName,
-                out var value)
+        return TryGetString(element, propertyName, out var value)
             ? value
             : null;
     }
@@ -1158,18 +905,9 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         value = null;
 
-        if (!element.TryGetProperty(
-                propertyName,
-                out var property))
-        {
+        if (!element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.String)
             return false;
-        }
-
-        if (property.ValueKind !=
-            JsonValueKind.String)
-        {
-            return false;
-        }
 
         value = property.GetString();
         return !string.IsNullOrWhiteSpace(value);
@@ -1183,17 +921,8 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         value = null;
 
-        if (!element.TryGetProperty(
-                parentProperty,
-                out var parent))
-        {
-            return false;
-        }
-
-        return TryGetString(
-            parent,
-            childProperty,
-            out value);
+        return element.TryGetProperty(parentProperty, out var parent) &&
+            TryGetString(parent, childProperty, out value);
     }
 
     private static bool TryGetBool(
@@ -1203,20 +932,10 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         value = false;
 
-        if (!element.TryGetProperty(
-                propertyName,
-                out var property))
-        {
+        if (!element.TryGetProperty(propertyName, out var property) ||
+            (property.ValueKind != JsonValueKind.True &&
+             property.ValueKind != JsonValueKind.False))
             return false;
-        }
-
-        if (property.ValueKind !=
-            JsonValueKind.True &&
-            property.ValueKind !=
-            JsonValueKind.False)
-        {
-            return false;
-        }
 
         value = property.GetBoolean();
         return true;
@@ -1230,17 +949,8 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         value = false;
 
-        if (!element.TryGetProperty(
-                parentProperty,
-                out var parent))
-        {
-            return false;
-        }
-
-        return TryGetBool(
-            parent,
-            childProperty,
-            out value);
+        return element.TryGetProperty(parentProperty, out var parent) &&
+            TryGetBool(parent, childProperty, out value);
     }
 
     private static bool TryGetBool(
@@ -1252,24 +962,11 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         value = false;
 
-        if (!element.TryGetProperty(
-                parentProperty,
-                out var parent))
-        {
+        if (!element.TryGetProperty(parentProperty, out var parent) ||
+            !parent.TryGetProperty(childProperty, out var child))
             return false;
-        }
 
-        if (!parent.TryGetProperty(
-                childProperty,
-                out var child))
-        {
-            return false;
-        }
-
-        return TryGetBool(
-            child,
-            grandChildProperty,
-            out value);
+        return TryGetBool(child, grandChildProperty, out value);
     }
 
     private static bool TryGetArray(
@@ -1279,18 +976,9 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         value = default;
 
-        if (!element.TryGetProperty(
-                propertyName,
-                out var property))
-        {
+        if (!element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.Array)
             return false;
-        }
-
-        if (property.ValueKind !=
-            JsonValueKind.Array)
-        {
-            return false;
-        }
 
         value = property;
         return true;
@@ -1304,17 +992,8 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         value = default;
 
-        if (!element.TryGetProperty(
-                parentProperty,
-                out var parent))
-        {
-            return false;
-        }
-
-        return TryGetArray(
-            parent,
-            childProperty,
-            out value);
+        return element.TryGetProperty(parentProperty, out var parent) &&
+            TryGetArray(parent, childProperty, out value);
     }
 
     private static bool TryGetInt(
@@ -1324,21 +1003,16 @@ public sealed class ServiceConfigurationAnalyzer : IAnalyzer
     {
         value = 0;
 
-        if (!element.TryGetProperty(
-                propertyName,
-                out var property))
-        {
+        if (!element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.Number)
             return false;
-        }
 
-        if (property.ValueKind !=
-            JsonValueKind.Number)
-        {
-            return false;
-        }
+        return property.TryGetInt32(out value);
+    }
 
-        return property.TryGetInt32(
-            out value);
+    private static string NormalizeId(string id)
+    {
+        return id.Trim().TrimEnd('/');
     }
 
     // =========================================================
