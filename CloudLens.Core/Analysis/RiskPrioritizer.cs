@@ -1,83 +1,61 @@
-using CloudLens.Core.Azure;
+using CloudLens.Core;
 
 namespace CloudLens.Core.Analysis;
 
 public sealed class RiskPrioritizer
 {
-    public AssessmentIntelligence Analyze(
-        TenantScanResult assessment)
+    public AssessmentIntelligence Analyze(TenantScanResult assessment)
     {
         if (assessment == null)
         {
-            throw new ArgumentNullException(
-                nameof(assessment));
+            throw new ArgumentNullException(nameof(assessment));
         }
 
-        var findings =
-            assessment.AllFindings
-                .Where(
-                    finding =>
-                        finding != null)
-                .ToList();
+        var findings = assessment.AllFindings
+            .Where(finding => finding != null)
+            .ToList();
 
         if (findings.Count == 0)
         {
             return new AssessmentIntelligence();
         }
 
-        var normalizedFindings =
-            findings
-                .Select(
-                    finding =>
-                        NormalizeFindingCategory(
-                            finding))
-                .ToList();
+        var normalizedFindings = findings
+            .Select(NormalizeFindingCategory)
+            .ToList();
 
-        var ruleOccurrences =
-            normalizedFindings
-                .GroupBy(
-                    finding =>
-                        $"{GetEffectiveCategory(finding)}|{finding.RuleId}",
-                    StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.ToList(),
-                    StringComparer.OrdinalIgnoreCase);
+        var ruleOccurrences = normalizedFindings
+            .GroupBy(
+                finding =>
+                    $"{GetEffectiveCategory(finding)}|{finding.RuleId}",
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.ToList(),
+                StringComparer.OrdinalIgnoreCase);
 
-        var intelligenceRisks =
-            normalizedFindings
-                .Select(
-                    finding =>
-                        BuildRisk(
-                            finding,
-                            ruleOccurrences))
-                .OrderBy(
-                    risk =>
-                        risk.Priority)
-                .ThenByDescending(
-                    risk =>
-                        risk.PriorityScore)
-                .ThenBy(
-                    risk =>
-                        SeverityOrder(
-                            risk.Severity))
-                .ThenBy(
-                    risk =>
-                        risk.Title,
-                    StringComparer.OrdinalIgnoreCase)
-                .ToList();
+        var intelligenceRisks = normalizedFindings
+            .Select(
+                finding =>
+                    BuildRisk(
+                        finding,
+                        ruleOccurrences))
+            .OrderBy(risk => risk.Priority)
+            .ThenByDescending(risk => risk.PriorityScore)
+            .ThenBy(
+                risk => SeverityOrder(risk.Severity))
+            .ThenBy(
+                risk => risk.Title,
+                StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         var systemicRisks =
-            BuildSystemicRisks(
-                ruleOccurrences);
+            BuildSystemicRisks(ruleOccurrences);
 
         var systemicFindingIds =
             systemicRisks
-                .SelectMany(
-                    risk =>
-                        risk.FindingIds)
-                .ToHashSet(
-                    StringComparer.OrdinalIgnoreCase);
+                .SelectMany(risk => risk.FindingIds)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         if (systemicFindingIds.Count > 0)
         {
@@ -91,7 +69,8 @@ public sealed class RiskPrioritizer
                                 {
                                     IsSystemic = true,
                                     Classification =
-                                        IntelligenceClassification.SystemicRisk
+                                        IntelligenceClassification
+                                            .SystemicRisk
                                 }
                                 : risk)
                     .ToList();
@@ -99,18 +78,12 @@ public sealed class RiskPrioritizer
 
         var quickWins =
             intelligenceRisks
-                .Where(
-                    risk =>
-                        risk.IsQuickWin)
-                .OrderBy(
-                    risk =>
-                        risk.Priority)
+                .Where(risk => risk.IsQuickWin)
+                .OrderBy(risk => risk.Priority)
                 .ThenByDescending(
-                    risk =>
-                        risk.PriorityScore)
+                    risk => risk.PriorityScore)
                 .ThenBy(
-                    risk =>
-                        risk.EffortScore)
+                    risk => risk.EffortScore)
                 .ToList();
 
         var roadmap =
@@ -120,33 +93,23 @@ public sealed class RiskPrioritizer
 
         return new AssessmentIntelligence
         {
-            Risks =
-                intelligenceRisks,
-
-            QuickWins =
-                quickWins,
-
-            SystemicRisks =
-                systemicRisks,
-
-            Roadmap =
-                roadmap
+            Risks = intelligenceRisks,
+            QuickWins = quickWins,
+            SystemicRisks = systemicRisks,
+            Roadmap = roadmap
         };
     }
 
     private static IntelligenceRisk BuildRisk(
         Finding finding,
-        IReadOnlyDictionary<
-            string,
-            List<Finding>> ruleOccurrences)
+        IReadOnlyDictionary<string, List<Finding>>
+            ruleOccurrences)
     {
         var effectiveCategory =
-            GetEffectiveCategory(
-                finding);
+            GetEffectiveCategory(finding);
 
         var severityScore =
-            GetSeverityScore(
-                finding.Severity);
+            GetSeverityScore(finding.Severity);
 
         var impactScore =
             GetImpactScore(
@@ -154,8 +117,7 @@ public sealed class RiskPrioritizer
                 effectiveCategory);
 
         var effortScore =
-            GetEffortScore(
-                finding);
+            GetEffortScore(finding);
 
         var exposureScore =
             GetExposureScore(
@@ -190,25 +152,25 @@ public sealed class RiskPrioritizer
                 100);
 
         var priority =
-            DeterminePriority(
+            GetPriority(
                 finding.Severity,
                 priorityScore,
                 effectiveCategory,
-                finding);
+                exposureScore);
 
         var isQuickWin =
             IsQuickWin(
                 finding,
-                effectiveCategory,
+                priority,
                 effortScore,
-                priority);
+                effectiveCategory);
 
         var classification =
-            DetermineClassification(
+            GetClassification(
                 finding,
-                effectiveCategory,
                 priority,
-                isQuickWin);
+                isQuickWin,
+                effectiveCategory);
 
         var rationale =
             BuildRationale(
@@ -218,8 +180,10 @@ public sealed class RiskPrioritizer
                 priorityScore,
                 impactScore,
                 effortScore,
+                exposureScore,
                 scopeScore,
-                savingScore);
+                savingScore,
+                isQuickWin);
 
         return new IntelligenceRisk(
             finding.Id,
@@ -241,28 +205,33 @@ public sealed class RiskPrioritizer
             rationale);
     }
 
-    private static List<SystemicRisk>
-        BuildSystemicRisks(
-            IReadOnlyDictionary<
-                string,
-                List<Finding>> ruleOccurrences)
+    private static List<SystemicRisk> BuildSystemicRisks(
+        IReadOnlyDictionary<string, List<Finding>>
+            ruleOccurrences)
     {
         return ruleOccurrences
-            .Where(
-                pair =>
-                    pair.Value.Count >= 3)
+            .Where(pair => pair.Value.Count >= 3)
             .Select(
                 pair =>
                 {
-                    var findings =
-                        pair.Value;
+                    var findings = pair.Value;
 
-                    var first =
-                        findings.First();
+                    // The representative finding must always be the
+                    // highest-severity finding in the group.
+                    // Do not rely on findings.First(), because the
+                    // order of findings can change between subscriptions
+                    // or discovery operations.
+                    var representative =
+                        findings
+                            .OrderBy(
+                                finding =>
+                                    SeverityOrder(
+                                        finding.Severity))
+                            .First();
 
                     var effectiveCategory =
                         GetEffectiveCategory(
-                            first);
+                            representative);
 
                     var affectedResources =
                         findings
@@ -283,15 +252,15 @@ public sealed class RiskPrioritizer
                                 25,
                                 findings.Count * 5) +
                             GetSeverityScore(
-                                first.Severity) / 2 +
+                                representative.Severity) / 2 +
                             GetRiskTypeBonus(
-                                first,
+                                representative,
                                 effectiveCategory) / 2,
                             0,
                             100);
 
                     var priority =
-                        first.Severity switch
+                        representative.Severity switch
                         {
                             Severity.Critical =>
                                 AssessmentPriority.P0,
@@ -299,8 +268,8 @@ public sealed class RiskPrioritizer
                             Severity.High =>
                                 AssessmentPriority.P1,
 
-                            Severity.Medium when
-                                findings.Count >= 5 =>
+                            Severity.Medium
+                                when findings.Count >= 5 =>
                                 AssessmentPriority.P1,
 
                             _ =>
@@ -308,40 +277,33 @@ public sealed class RiskPrioritizer
                         };
 
                     return new SystemicRisk(
-                        $"SYS-{effectiveCategory}-{first.RuleId}",
-                        $"Systemic issue: {first.Title}",
+                        $"SYS-{effectiveCategory}-{representative.RuleId}",
+                        $"Systemic issue: {representative.Title}",
                         effectiveCategory,
-                        first.Severity,
+                        representative.Severity,
                         findings.Count,
                         affectedResources,
                         priority,
                         priorityScore,
                         BuildSystemicDescription(
-                            first,
+                            representative,
                             findings.Count,
                             affectedResources),
                         findings
-                            .Select(
-                                finding =>
-                                    finding.Id)
+                            .Select(finding => finding.Id)
                             .ToList());
                 })
-            .OrderBy(
-                risk =>
-                    risk.Priority)
+            .OrderBy(risk => risk.Priority)
             .ThenByDescending(
-                risk =>
-                    risk.PriorityScore)
+                risk => risk.PriorityScore)
             .ThenByDescending(
-                risk =>
-                    risk.FindingCount)
+                risk => risk.FindingCount)
             .ToList();
     }
 
-    private static List<RemediationRoadmapItem>
-        BuildRoadmap(
-            IReadOnlyList<IntelligenceRisk> risks,
-            TenantScanResult assessment)
+    private static List<RemediationRoadmapItem> BuildRoadmap(
+        IReadOnlyList<IntelligenceRisk> risks,
+        TenantScanResult assessment)
     {
         var remediationByFinding =
             assessment.Subscriptions
@@ -352,12 +314,10 @@ public sealed class RiskPrioritizer
                             .Remediation
                             .Actions)
                 .GroupBy(
-                    action =>
-                        action.FindingId,
+                    action => action.FindingId,
                     StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    group =>
-                        group.Key,
+                    group => group.Key,
                     group =>
                         group
                             .OrderBy(
@@ -367,15 +327,11 @@ public sealed class RiskPrioritizer
                     StringComparer.OrdinalIgnoreCase);
 
         return risks
-            .OrderBy(
-                risk =>
-                    risk.Priority)
+            .OrderBy(risk => risk.Priority)
             .ThenByDescending(
-                risk =>
-                    risk.PriorityScore)
+                risk => risk.PriorityScore)
             .ThenByDescending(
-                risk =>
-                    risk.MonthlySavingEur)
+                risk => risk.MonthlySavingEur)
             .Select(
                 risk =>
                 {
@@ -405,56 +361,107 @@ public sealed class RiskPrioritizer
     private static Finding NormalizeFindingCategory(
         Finding finding)
     {
-        var effectiveCategory =
-            GetEffectiveCategory(
-                finding);
+        var category = finding.Category;
+        var ruleId = finding.RuleId ?? string.Empty;
 
-        if (effectiveCategory == finding.Category)
+        if (ruleId.StartsWith(
+                "COST-",
+                StringComparison.OrdinalIgnoreCase))
         {
-            return finding;
+            category = Category.Cost;
+        }
+        else if (
+            ruleId.StartsWith(
+                "SEC-",
+                StringComparison.OrdinalIgnoreCase) ||
+            ruleId.StartsWith(
+                "NSG-",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            category = Category.Security;
+        }
+        else if (
+            ruleId.StartsWith(
+                "OPS-",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            category = Category.Operations;
+        }
+        else if (
+            ruleId.StartsWith(
+                "GOV-",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            category = Category.Governance;
+        }
+        else if (
+            ruleId.StartsWith(
+                "CORR-",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            category = Category.Reliability;
+        }
+        else if (
+            ruleId.StartsWith(
+                "ARCH-",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            category = Category.Architecture;
         }
 
         return finding with
         {
-            Category = effectiveCategory
+            Category = category
         };
     }
 
     private static Category GetEffectiveCategory(
         Finding finding)
     {
-        var ruleId =
-            finding.RuleId
-                .Trim()
-                .ToUpperInvariant();
+        var ruleId = finding.RuleId ?? string.Empty;
 
-        if (ruleId.StartsWith("COST-"))
+        if (ruleId.StartsWith(
+                "COST-",
+                StringComparison.OrdinalIgnoreCase))
         {
             return Category.Cost;
         }
 
-        if (ruleId.StartsWith("SEC-") ||
-            ruleId.StartsWith("NSG-"))
+        if (
+            ruleId.StartsWith(
+                "SEC-",
+                StringComparison.OrdinalIgnoreCase) ||
+            ruleId.StartsWith(
+                "NSG-",
+                StringComparison.OrdinalIgnoreCase))
         {
             return Category.Security;
         }
 
-        if (ruleId.StartsWith("OPS-"))
+        if (ruleId.StartsWith(
+                "OPS-",
+                StringComparison.OrdinalIgnoreCase))
         {
             return Category.Operations;
         }
 
-        if (ruleId.StartsWith("GOV-"))
+        if (ruleId.StartsWith(
+                "GOV-",
+                StringComparison.OrdinalIgnoreCase))
         {
             return Category.Governance;
         }
 
-        if (ruleId.StartsWith("CORR-"))
+        if (ruleId.StartsWith(
+                "CORR-",
+                StringComparison.OrdinalIgnoreCase))
         {
             return Category.Reliability;
         }
 
-        if (ruleId.StartsWith("ARCH-"))
+        if (ruleId.StartsWith(
+                "ARCH-",
+                StringComparison.OrdinalIgnoreCase))
         {
             return Category.Architecture;
         }
@@ -475,6 +482,19 @@ public sealed class RiskPrioritizer
         };
     }
 
+    private static int SeverityOrder(
+        Severity severity)
+    {
+        return severity switch
+        {
+            Severity.Critical => 0,
+            Severity.High => 1,
+            Severity.Medium => 2,
+            Severity.Low => 3,
+            _ => 4
+        };
+    }
+
     private static int GetImpactScore(
         Finding finding,
         Category effectiveCategory)
@@ -492,59 +512,53 @@ public sealed class RiskPrioritizer
                 _ => 0
             };
 
-        if (!string.IsNullOrWhiteSpace(
-                finding.Impact))
+        if (!string.IsNullOrWhiteSpace(finding.Impact))
         {
             score += 5;
         }
 
-        return Math.Min(
-            30,
-            score);
+        return Math.Min(30, score);
     }
 
     private static int GetEffortScore(
         Finding finding)
     {
         var text =
-            $"{finding.Title} {finding.Recommendation}"
+            $"{finding.Title} {finding.Description} {finding.Recommendation} {finding.RuleId}"
                 .ToLowerInvariant();
 
-        if (ContainsAny(
-                text,
-                "delete",
-                "remove",
-                "disable",
-                "enable",
-                "configure",
-                "tag",
-                "rbac",
-                "network security group",
-                "nsg"))
+        if (
+            text.Contains("delete") ||
+            text.Contains("remove") ||
+            text.Contains("disable") ||
+            text.Contains("enable") ||
+            text.Contains("configure") ||
+            text.Contains("tag") ||
+            text.Contains("rbac") ||
+            text.Contains("network security group") ||
+            text.Contains("nsg"))
         {
             return 6;
         }
 
-        if (ContainsAny(
-                text,
-                "resize",
-                "scale",
-                "sku",
-                "tier",
-                "replication",
-                "backup"))
+        if (
+            text.Contains("resize") ||
+            text.Contains("scale") ||
+            text.Contains("sku") ||
+            text.Contains("tier") ||
+            text.Contains("replication") ||
+            text.Contains("backup"))
         {
             return 12;
         }
 
-        if (ContainsAny(
-                text,
-                "architecture",
-                "redesign",
-                "migration",
-                "availability zone",
-                "high availability",
-                "domain controller"))
+        if (
+            text.Contains("architecture") ||
+            text.Contains("redesign") ||
+            text.Contains("migration") ||
+            text.Contains("availability zone") ||
+            text.Contains("high availability") ||
+            text.Contains("domain controller"))
         {
             return 25;
         }
@@ -560,20 +574,18 @@ public sealed class RiskPrioritizer
             $"{finding.Title} {finding.Description}"
                 .ToLowerInvariant();
 
-        if (ContainsAny(
-                text,
-                "public",
-                "internet",
-                "exposed",
-                "ssh",
-                "rdp",
-                "management"))
+        if (
+            text.Contains("public") ||
+            text.Contains("internet") ||
+            text.Contains("exposed") ||
+            text.Contains("ssh") ||
+            text.Contains("rdp") ||
+            text.Contains("management"))
         {
             return 15;
         }
 
-        if (effectiveCategory ==
-            Category.Security)
+        if (effectiveCategory == Category.Security)
         {
             return 10;
         }
@@ -584,25 +596,22 @@ public sealed class RiskPrioritizer
     private static int GetScopeScore(
         Finding finding,
         Category effectiveCategory,
-        IReadOnlyDictionary<
-            string,
-            List<Finding>> ruleOccurrences)
+        IReadOnlyDictionary<string, List<Finding>>
+            ruleOccurrences)
     {
         var key =
             $"{effectiveCategory}|{finding.RuleId}";
 
         if (!ruleOccurrences.TryGetValue(
                 key,
-                out var findings))
+                out var occurrences))
         {
             return 0;
         }
 
         return Math.Min(
             15,
-            Math.Max(
-                0,
-                (findings.Count - 1) * 3));
+            Math.Max(0, occurrences.Count - 1) * 3);
     }
 
     private static int GetSavingScore(
@@ -641,9 +650,7 @@ public sealed class RiskPrioritizer
         Category effectiveCategory)
     {
         var ruleId =
-            finding.RuleId
-                .Trim()
-                .ToUpperInvariant();
+            finding.RuleId ?? string.Empty;
 
         var text =
             $"{finding.Title} {finding.Description}"
@@ -651,100 +658,151 @@ public sealed class RiskPrioritizer
 
         var bonus = 0;
 
-        if (effectiveCategory ==
-            Category.Security)
+        if (effectiveCategory == Category.Security)
         {
             bonus += 4;
         }
 
-        if (ContainsAny(
-                text,
-                "public",
-                "internet",
-                "exposed",
-                "management",
-                "rdp",
-                "ssh"))
+        if (
+            text.Contains("public") ||
+            text.Contains("internet") ||
+            text.Contains("exposed") ||
+            text.Contains("management") ||
+            text.Contains("rdp") ||
+            text.Contains("ssh"))
         {
             bonus += 8;
         }
 
-        if (ContainsAny(
-                ruleId,
+        if (
+            ruleId.Contains(
                 "BACKUP",
+                StringComparison.OrdinalIgnoreCase) ||
+            ruleId.Contains(
                 "NO-HA",
-                "NO-AVAILABILITY"))
+                StringComparison.OrdinalIgnoreCase) ||
+            ruleId.Contains(
+                "NO-AVAILABILITY",
+                StringComparison.OrdinalIgnoreCase))
         {
             bonus += 6;
         }
 
-        if (ContainsAny(
-                ruleId,
+        if (
+            ruleId.Contains(
                 "SINGLE-REGION",
-                "LRS"))
+                StringComparison.OrdinalIgnoreCase) ||
+            ruleId.Contains(
+                "LRS",
+                StringComparison.OrdinalIgnoreCase))
         {
             bonus += 3;
         }
 
-        return Math.Min(
-            15,
-            bonus);
+        return Math.Min(15, bonus);
     }
 
-    private static AssessmentPriority DeterminePriority(
+    private static AssessmentPriority GetPriority(
         Severity severity,
-        int score,
+        int priorityScore,
         Category effectiveCategory,
-        Finding finding)
+        int exposureScore)
     {
-        if (severity == Severity.Critical)
+        return severity switch
         {
-            return AssessmentPriority.P0;
-        }
+            Severity.Critical =>
+                AssessmentPriority.P0,
 
-        if (severity == Severity.High)
-        {
-            return score >= 60
-                ? AssessmentPriority.P0
-                : AssessmentPriority.P1;
-        }
+            Severity.High when priorityScore >= 60 =>
+                AssessmentPriority.P0,
 
-        if (severity == Severity.Medium)
-        {
-            if (score >= 55)
-            {
-                return AssessmentPriority.P1;
-            }
+            Severity.High =>
+                AssessmentPriority.P1,
 
-            if (score >= 35)
-            {
-                return AssessmentPriority.P2;
-            }
+            Severity.Medium when priorityScore >= 55 =>
+                AssessmentPriority.P1,
 
-            return AssessmentPriority.P3;
-        }
+            Severity.Medium when priorityScore >= 35 =>
+                AssessmentPriority.P2,
 
-        if (effectiveCategory == Category.Security &&
-            IsSecurityExposure(finding) &&
-            score >= 40)
-        {
-            return AssessmentPriority.P2;
-        }
+            Severity.Medium =>
+                AssessmentPriority.P3,
 
-        if (score >= 35)
-        {
-            return AssessmentPriority.P2;
-        }
+            Severity.Low
+                when effectiveCategory == Category.Security &&
+                     exposureScore >= 15 &&
+                     priorityScore >= 40 =>
+                AssessmentPriority.P2,
 
-        return AssessmentPriority.P3;
+            Severity.Low when priorityScore >= 35 =>
+                AssessmentPriority.P2,
+
+            _ =>
+                AssessmentPriority.P3
+        };
     }
 
-    private static IntelligenceClassification
-        DetermineClassification(
-            Finding finding,
-            Category effectiveCategory,
-            AssessmentPriority priority,
-            bool isQuickWin)
+    private static bool IsQuickWin(
+        Finding finding,
+        AssessmentPriority priority,
+        int effortScore,
+        Category effectiveCategory)
+    {
+        if (finding.Severity == Severity.Critical)
+        {
+            return false;
+        }
+
+        if (priority == AssessmentPriority.P0)
+        {
+            return false;
+        }
+
+        var ruleId =
+            finding.RuleId ?? string.Empty;
+
+        if (
+            ruleId.Equals(
+                "DISK-UNATTACHED",
+                StringComparison.OrdinalIgnoreCase) ||
+            ruleId.Equals(
+                "PIP-UNUSED",
+                StringComparison.OrdinalIgnoreCase) ||
+            ruleId.Equals(
+                "PIP-ORPHAN",
+                StringComparison.OrdinalIgnoreCase) ||
+            ruleId.Equals(
+                "NSG-ORPHAN",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (
+            ruleId.Equals(
+                "GOV-NO-TAGS",
+                StringComparison.OrdinalIgnoreCase) &&
+            effortScore <= 10)
+        {
+            return true;
+        }
+
+        if (
+            effectiveCategory == Category.Cost &&
+            effortScore <= 10)
+        {
+            return true;
+        }
+
+        return effortScore <= 8 &&
+               priority >= AssessmentPriority.P2;
+    }
+
+    private static IntelligenceClassification GetClassification(
+        Finding finding,
+        AssessmentPriority priority,
+        bool isQuickWin,
+        Category effectiveCategory)
     {
         if (isQuickWin)
         {
@@ -761,84 +819,19 @@ public sealed class RiskPrioritizer
             return IntelligenceClassification.HighPriority;
         }
 
-        if (effectiveCategory ==
-                Category.Cost ||
+        if (
+            effectiveCategory == Category.Cost ||
             finding.MonthlySavingEur > 0)
         {
             return IntelligenceClassification.Optimization;
         }
 
-        if (effectiveCategory ==
-            Category.Architecture)
+        if (effectiveCategory == Category.Architecture)
         {
             return IntelligenceClassification.Optimization;
         }
 
         return IntelligenceClassification.HighPriority;
-    }
-
-    private static bool IsQuickWin(
-        Finding finding,
-        Category effectiveCategory,
-        int effortScore,
-        AssessmentPriority priority)
-    {
-        if (finding.Severity == Severity.Critical)
-        {
-            return false;
-        }
-
-        if (priority == AssessmentPriority.P0)
-        {
-            return false;
-        }
-
-        var ruleId =
-            finding.RuleId
-                .Trim()
-                .ToUpperInvariant();
-
-        if (ContainsAny(
-                ruleId,
-                "DISK-UNATTACHED",
-                "PIP-UNUSED",
-                "PIP-ORPHAN",
-                "NSG-ORPHAN"))
-        {
-            return true;
-        }
-
-        if (ruleId == "GOV-NO-TAGS" &&
-            effortScore <= 10)
-        {
-            return true;
-        }
-
-        if (effectiveCategory == Category.Cost &&
-            effortScore <= 10)
-        {
-            return true;
-        }
-
-        return effortScore <= 8 &&
-               priority >= AssessmentPriority.P2;
-    }
-
-    private static bool IsSecurityExposure(
-        Finding finding)
-    {
-        var text =
-            $"{finding.RuleId} {finding.Title} {finding.Description}"
-                .ToLowerInvariant();
-
-        return ContainsAny(
-            text,
-            "public",
-            "internet",
-            "exposed",
-            "management",
-            "rdp",
-            "ssh");
     }
 
     private static string BuildRationale(
@@ -848,116 +841,70 @@ public sealed class RiskPrioritizer
         int priorityScore,
         int impactScore,
         int effortScore,
+        int exposureScore,
         int scopeScore,
-        int savingScore)
+        int savingScore,
+        bool isQuickWin)
     {
-        var reasons =
-            new List<string>();
+        var reasons = new List<string>();
 
-        if (finding.Severity ==
-            Severity.Critical)
+        if (finding.Severity == Severity.Critical)
         {
-            reasons.Add(
-                "critical severity");
+            reasons.Add("critical severity");
         }
-        else if (finding.Severity ==
-                 Severity.High)
+        else if (finding.Severity == Severity.High)
         {
-            reasons.Add(
-                "high severity");
+            reasons.Add("high severity");
         }
 
-        if (IsSecurityExposure(
-                finding))
+        if (impactScore >= 20)
         {
-            reasons.Add(
-                "security or network exposure");
+            reasons.Add("high business/technical impact");
         }
-        else if (effectiveCategory ==
-                 Category.Reliability)
+
+        if (exposureScore >= 15)
         {
-            reasons.Add(
-                "reliability impact");
-        }
-        else if (effectiveCategory ==
-                 Category.Cost)
-        {
-            reasons.Add(
-                "cost optimization impact");
-        }
-        else if (impactScore >= 20)
-        {
-            reasons.Add(
-                "significant operational impact");
+            reasons.Add("significant exposure");
         }
 
         if (scopeScore >= 6)
         {
-            reasons.Add(
-                "repeated across multiple resources");
+            reasons.Add("repeated pattern across resources");
         }
 
-        if (savingScore >= 6)
+        if (savingScore > 0)
         {
             reasons.Add(
-                "measurable cost-saving potential");
+                "potential cost optimization");
         }
 
-        if (effortScore <= 10)
+        if (isQuickWin)
         {
-            reasons.Add(
-                "relatively low remediation effort");
+            reasons.Add("low implementation effort");
         }
 
         if (reasons.Count == 0)
         {
             reasons.Add(
-                "requires review based on the assessment findings");
+                $"priority based on {effectiveCategory} assessment");
         }
 
         return
-            $"{priority} priority with score {priorityScore}/100: " +
-            string.Join(
-                ", ",
-                reasons) +
-            ".";
+            $"{priority} priority (score {priorityScore}/100): " +
+            $"{string.Join(", ", reasons)}. " +
+            $"Estimated effort score: {effortScore}.";
     }
 
     private static string BuildSystemicDescription(
-        Finding finding,
+        Finding representative,
         int findingCount,
         int affectedResources)
     {
         return
-            $"The same assessment issue was detected " +
-            $"{findingCount} times across " +
-            $"{affectedResources} affected resources. " +
-            $"This indicates a potentially systemic configuration or " +
-            $"governance pattern rather than an isolated resource issue. " +
-            $"Rule: {finding.RuleId}.";
-    }
-
-    private static bool ContainsAny(
-        string value,
-        params string[] terms)
-    {
-        return terms.Any(
-            term =>
-                value.Contains(
-                    term,
-                    StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static int SeverityOrder(
-        Severity severity)
-    {
-        return severity switch
-        {
-            Severity.Critical => 0,
-            Severity.High => 1,
-            Severity.Medium => 2,
-            Severity.Low => 3,
-            _ => 4
-        };
+            $"{representative.Title} affects " +
+            $"{affectedResources} resource(s) across " +
+            $"{findingCount} finding(s), indicating a repeated " +
+            "configuration or governance pattern rather than " +
+            "an isolated issue.";
     }
 }
